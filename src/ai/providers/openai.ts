@@ -1,6 +1,11 @@
 import OpenAI from "openai";
 import { config } from "../../config/env.js";
 
+// ── Tipos re-exportados para el agente ─────────────────────────
+export type ChatMessage = OpenAI.Chat.ChatCompletionMessageParam;
+export type ChatTool = OpenAI.Chat.ChatCompletionTool;
+export type ChatCompletion = OpenAI.Chat.ChatCompletion;
+
 export interface OpenAIResponse {
   text: string;
   model: string;
@@ -48,4 +53,23 @@ export async function callOpenAI(
     id: (response as any).id,
     usage: (response as any).usage || null,
   };
+}
+
+// ── Function Calling: llamada con herramientas ─────────────────
+export async function createChatCompletion(
+  messages: ChatMessage[],
+  tools?: ChatTool[],
+  maxTokens = 2000,
+): Promise<ChatCompletion> {
+  const openai = getClient();
+  const isReasoningModel = /^o\d/i.test(config.openaiModel);
+
+  return openai.chat.completions.create({
+    model: config.openaiModel,
+    messages,
+    ...(tools && tools.length > 0 ? { tools } : {}),
+    ...(isReasoningModel
+      ? { max_completion_tokens: maxTokens }
+      : { temperature: 0.2, max_tokens: maxTokens }),
+  });
 }
