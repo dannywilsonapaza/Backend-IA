@@ -6,8 +6,12 @@ import {
   getDetalleCotizacion,
 } from "./backendPrincipalApi.js";
 import {
-  ejecutarComparacionCompleta,
+  obtenerCandidatos,
   compararKPIs,
+  compararMinutajes,
+  compararComponentes,
+  ejecutarComparacionCompleta,
+  seleccionarMejorCandidato,
 } from "../services/comparacionService.js";
 
 function pickCotizacionId(params: Record<string, any>): number | null {
@@ -204,185 +208,145 @@ export const quoteComponentsTool: ToolDefinition = {
   },
 };
 
-// HELPER COMPARISON TOOL EXECUTOR
-async function executeComparisonTool(
-  params: any,
-  ctx: any,
-  grupo: "ESTILO_CLIENTE" | "CLIENTE" | "GLOBAL",
-  intent: string,
-): Promise<ToolResult> {
-  const cotizacionId = pickCotizacionId(params);
-  if (!cotizacionId) {
+// ── TOOL: Listar candidatos para comparación ──────────────────
+export const quoteListCandidatesTool: ToolDefinition = {
+  id: "quote.compare.candidates",
+  description:
+    "Lista las cotizaciones candidatas para comparación por grupo (ESTILO_CLIENTE, ESTILO_NETTALCO, CLIENTE, GLOBAL).",
+  requiredParams: ["cotizacionId", "grupo"],
+  examples: [
+    "listar candidatos por estilo cliente para 217442",
+    "cotizaciones similares del mismo cliente para 217442",
+    "candidatos globales para la 217442",
+  ],
+  execute: async (params): Promise<ToolResult> => {
+    const cotizacionId = pickCotizacionId(params);
+    const grupo = (params.grupo ?? "ESTILO_CLIENTE")
+      .toString()
+      .toUpperCase()
+      .trim();
+    const gruposValidos = [
+      "ESTILO_CLIENTE",
+      "ESTILO_NETTALCO",
+      "CLIENTE",
+      "GLOBAL",
+    ];
+
+    if (!cotizacionId) {
+      return {
+        intent: "quote.compare.candidates",
+        entities: { cotizacionId: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta cotizacionId",
+            data: { message: "Necesito el ID de la cotización." },
+          },
+        ],
+      };
+    }
+
+    if (!gruposValidos.includes(grupo)) {
+      return {
+        intent: "quote.compare.candidates",
+        entities: { cotizacionId, grupo },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Grupo inválido",
+            data: {
+              message: `El grupo "${grupo}" no es válido. Opciones: ${gruposValidos.join(", ")}`,
+            },
+          },
+        ],
+      };
+    }
+
+    const result = await obtenerCandidatos(cotizacionId, grupo as any);
+
+    if (!result.success || !result.data) {
+      return {
+        intent: "quote.compare.candidates",
+        entities: { cotizacionId, grupo },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Sin candidatos",
+            data: {
+              message:
+                result.error ??
+                "No se encontraron candidatos para comparación.",
+            },
+          },
+        ],
+      };
+    }
+
+    const { candidatos, cotizacionActual, total } = result.data;
+    const mejorCandidato = seleccionarMejorCandidato(candidatos);
+
+    // Mostrar los primeros 20 candidatos como tabla
+    const rows = candidatos.slice(0, 20).map((c: any) => ({
+      ID: c.COTIZACION_ID,
+      Temporada: c.TEMPORADA,
+      "Precio FOB": c.PRECIO_FOB ?? "N/D",
+      "Costo Pond.": c.COSTO_PONDERADO ?? "N/D",
+      Estado: c.ESTADO ?? "N/D",
+    }));
+
     return {
-      intent,
-      entities: { cotizacionId: null },
+      intent: "quote.compare.candidates",
+      entities: { cotizacionId, grupo },
       artifacts: [
         {
-          type: "warning",
-          title: "Falta cotizacionId",
-          data: { message: "Necesito el ID de la cotización." },
-        },
-      ],
-    };
-  }
-
-  const comparacion = await ejecutarComparacionCompleta(cotizacionId, grupo);
-
-  if (!comparacion.success || !comparacion.kpis) {
-    return {
-      intent,
-      entities: { cotizacionId },
-      artifacts: [
-        {
-          type: "warning",
-          title: "Comparación no disponible",
+          type: "facts",
+          title: `Candidatos para comparación (${grupo})`,
           data: {
-            message:
-              comparacion.error ||
-              "No se pudieron calcular los KPIs para esta cotización.",
+            "Cotización Actual": cotizacionActual
+              ? `#${cotizacionActual.COTIZACION_ID} (${cotizacionActual.TEMPORADA ?? ""})`
+              : cotizacionId,
+            "Total candidatos": total,
+            "Mejor candidato sugerido": mejorCandidato
+              ? `#${mejorCandidato.COTIZACION_ID} (${mejorCandidato.TEMPORADA})`
+              : "Ninguno",
+            Grupo: grupo,
           },
         },
-      ],
-    };
-  }
-
-  // Formatting as facts and table just like the frontend expects
-  const kpis = comparacion.kpis;
-  const tableData = [
-    {
-      Indicador: "Precio FOB",
-      Actual: kpis.cotizacionActual.precioFob ?? "N/D",
-      Anterior: kpis.cotizacionAnterior.precioFob ?? "N/D",
-      Diferencia: kpis.diferencias.precioFob ?? "N/D",
-    },
-    {
-      Indicador: "Costo Ponderado",
-      Actual: kpis.cotizacionActual.costoPonderado ?? "N/D",
-      Anterior: kpis.cotizacionAnterior.costoPonderado ?? "N/D",
-      Diferencia: kpis.diferencias.costoPonderado ?? "N/D",
-    },
-    {
-      Indicador: "Markup",
-      Actual: kpis.cotizacionActual.markup ?? "N/D",
-      Anterior: kpis.cotizacionAnterior.markup ?? "N/D",
-      Diferencia: kpis.diferencias.markup ?? "N/D",
-    },
-    {
-      Indicador: "Prendas Est.",
-      Actual: kpis.cotizacionActual.prendasEstimadas ?? "N/D",
-      Anterior: kpis.cotizacionAnterior.prendasEstimadas ?? "N/D",
-      Diferencia: kpis.diferencias.prendasEstimadas ?? "N/D",
-    },
-  ];
-
-  return {
-    intent,
-    entities: { cotizacionId },
-    artifacts: [
-      {
-        type: "facts",
-        title: `Resumen de Comparación (${grupo})`,
-        data: {
-          "Cotización Actual": kpis.cotizacionActual.temporada,
-          "Cotización Base": `${comparacion.candidatoSeleccionado?.COTIZACION_ID} (${kpis.cotizacionAnterior.temporada})`,
-          "Total Candidatos Evaluados": comparacion.totalCandidatos,
+        {
+          type: "table",
+          title: `Lista de candidatos (${grupo})`,
+          data: { rows, total },
         },
-      },
-      {
-        type: "table",
-        title: "Comparación de KPIs",
-        data: { rows: tableData, total: 4 },
-      },
-      ...(comparacion.componentes && comparacion.componentes.length > 0
-        ? [
-            {
-              type: "table" as const,
-              title: `Comparación de Componentes (vs #${comparacion.candidatoSeleccionado?.COTIZACION_ID})`,
-              data: {
-                rows: comparacion.componentes,
-                total: comparacion.componentes.length,
-              },
-            },
-          ]
-        : []),
-      ...(comparacion.minutajes && comparacion.minutajes.length > 0
-        ? [
-            {
-              type: "table" as const,
-              title: `Comparación de Minutajes (vs #${comparacion.candidatoSeleccionado?.COTIZACION_ID})`,
-              data: {
-                rows: comparacion.minutajes,
-                total: comparacion.minutajes.length,
-              },
-            },
-          ]
-        : []),
-    ],
-  };
-}
-
-export const quoteCompareClientTool: ToolDefinition = {
-  id: "quote.compare.client",
-  description:
-    "Compara los KPIs de la cotización actual con otras cotizaciones históricas del MISMO CLIENTE.",
-  requiredParams: ["cotizacionId"],
-  examples: [
-    "compara kpis con el mismo cliente para 217442",
-    "busca cotizaciones similares del cliente para la 217442",
-    "comparación cliente 217442",
-  ],
-  execute: async (params, ctx) =>
-    executeComparisonTool(params, ctx, "CLIENTE", "quote.compare.client"),
+      ],
+      limits:
+        total > 20
+          ? { truncated: true, reason: "Se muestran los primeros 20" }
+          : undefined,
+    };
+  },
 };
 
-export const quoteCompareStyleTool: ToolDefinition = {
-  id: "quote.compare.style",
+// ── TOOL: Comparar KPIs entre dos cotizaciones ────────────────
+export const quoteCompareKpisTool: ToolDefinition = {
+  id: "quote.compare.kpis",
   description:
-    "Compara los KPIs de la cotización actual con otras cotizaciones históricas que compartan EXACTAMENTE EL MISMO ESTILO del cliente.",
-  requiredParams: ["cotizacionId"],
+    "Compara los KPIs (Precio FOB, Costo Ponderado, Markup, Prendas Estimadas) entre dos cotizaciones específicas.",
+  requiredParams: ["cotizacionActual", "cotizacionAnterior"],
   examples: [
-    "compara kpis del mismo estilo para la 217442",
-    "busca cotizaciones con el mismo estilo de la 217442",
-    "comparación estilo 217442",
+    "compara kpis entre 217442 y 170719",
+    "kpis de 217442 vs 214864",
+    "diferencias financieras entre ambas cotizaciones",
   ],
-  execute: async (params, ctx) =>
-    executeComparisonTool(params, ctx, "ESTILO_CLIENTE", "quote.compare.style"),
-};
+  execute: async (params): Promise<ToolResult> => {
+    const cotActual = Number(params.cotizacionActual);
+    const cotAnterior = Number(params.cotizacionAnterior);
 
-export const quoteCompareGlobalTool: ToolDefinition = {
-  id: "quote.compare.global",
-  description:
-    "Compara los KPIs de la cotización actual con otras cotizaciones históricas A NIVEL GLOBAL (toda la base de datos).",
-  requiredParams: ["cotizacionId"],
-  examples: [
-    "compara kpis a nivel global de la 217442",
-    "búsqueda inteligente global para la 217442",
-    "comparación global 217442",
-  ],
-  execute: async (params, ctx) =>
-    executeComparisonTool(params, ctx, "GLOBAL", "quote.compare.global"),
-};
-
-export const quoteCompareTwoTool: ToolDefinition = {
-  id: "quote.compare.two",
-  description:
-    "Compara los KPIs y costos financieros entre DOS cotizaciones ESPECÍFICAS proporcionando ambos IDs.",
-  requiredParams: ["cotizacionA", "cotizacionB"],
-  examples: [
-    "compara los costos de la cotizacion 217442 y 214864",
-    "diferencias kpis entre 217442 y 214864",
-    "comparar 217442 vs 214864",
-  ],
-  execute: async (params, ctx) => {
-    const cotA = Number(params.cotizacionA);
-    const cotB = Number(params.cotizacionB);
-
-    if (!Number.isFinite(cotA) || !Number.isFinite(cotB)) {
+    if (!Number.isFinite(cotActual) || !Number.isFinite(cotAnterior)) {
       return {
-        intent: "quote.compare.two",
+        intent: "quote.compare.kpis",
         entities: {
-          cotizacionA: params.cotizacionA,
-          cotizacionB: params.cotizacionB,
+          cotizacionActual: params.cotizacionActual,
+          cotizacionAnterior: params.cotizacionAnterior,
         },
         artifacts: [
           {
@@ -394,27 +358,28 @@ export const quoteCompareTwoTool: ToolDefinition = {
       };
     }
 
-    const comparacion = await compararKPIs(cotA, cotB);
+    const result = await compararKPIs(cotActual, cotAnterior);
 
-    if (!comparacion.success || !comparacion.data) {
+    if (!result.success || !result.data) {
       return {
-        intent: "quote.compare.two",
-        entities: { cotizacionA: cotA, cotizacionB: cotB },
+        intent: "quote.compare.kpis",
+        entities: {
+          cotizacionActual: cotActual,
+          cotizacionAnterior: cotAnterior,
+        },
         artifacts: [
           {
             type: "warning",
             title: "Comparación no disponible",
             data: {
-              message:
-                comparacion.error ||
-                "No se pudieron comparar los KPIs para estas cotizaciones.",
+              message: result.error ?? "No se pudieron comparar los KPIs.",
             },
           },
         ],
       };
     }
 
-    const kpis = comparacion.data;
+    const kpis = result.data;
     const tableData = [
       {
         Indicador: "Precio FOB",
@@ -443,21 +408,507 @@ export const quoteCompareTwoTool: ToolDefinition = {
     ];
 
     return {
-      intent: "quote.compare.two",
-      entities: { cotizacionA: cotA, cotizacionB: cotB },
+      intent: "quote.compare.kpis",
+      entities: {
+        cotizacionActual: cotActual,
+        cotizacionAnterior: cotAnterior,
+      },
       artifacts: [
         {
           type: "facts",
-          title: `Comparación Directa de KPIs`,
+          title: "Comparación de KPIs",
           data: {
-            "Cotización Actual (A)": `${cotA} (${kpis.cotizacionActual.temporada})`,
-            "Cotización Base (B)": `${cotB} (${kpis.cotizacionAnterior.temporada})`,
+            "Cotización Actual": `#${cotActual} (${kpis.cotizacionActual.temporada})`,
+            "Cotización Anterior": `#${cotAnterior} (${kpis.cotizacionAnterior.temporada})`,
           },
         },
         {
           type: "table",
-          title: "Comparación de KPIs",
+          title: "KPIs comparados",
           data: { rows: tableData, total: 4 },
+        },
+      ],
+    };
+  },
+};
+
+// ── TOOL: Comparar componentes entre dos cotizaciones ─────────
+export const quoteCompareComponentesTool: ToolDefinition = {
+  id: "quote.compare.components",
+  description:
+    "Compara los componentes (avíos, telas, hilos, etc.) entre dos cotizaciones específicas.",
+  requiredParams: ["cotizacionActual", "cotizacionAnterior"],
+  examples: [
+    "compara componentes entre 217442 y 170719",
+    "diferencia de avíos entre ambas cotizaciones",
+    "qué componentes cambiaron entre 217442 y 214864",
+  ],
+  execute: async (params): Promise<ToolResult> => {
+    const cotActual = Number(params.cotizacionActual);
+    const cotAnterior = Number(params.cotizacionAnterior);
+
+    if (!Number.isFinite(cotActual) || !Number.isFinite(cotAnterior)) {
+      return {
+        intent: "quote.compare.components",
+        entities: {
+          cotizacionActual: params.cotizacionActual,
+          cotizacionAnterior: params.cotizacionAnterior,
+        },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Faltan IDs",
+            data: { message: "Necesito los IDs de ambas cotizaciones." },
+          },
+        ],
+      };
+    }
+
+    const result = await compararComponentes(cotActual, cotAnterior);
+
+    if (!result.success || !result.data) {
+      return {
+        intent: "quote.compare.components",
+        entities: {
+          cotizacionActual: cotActual,
+          cotizacionAnterior: cotAnterior,
+        },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Comparación no disponible",
+            data: {
+              message:
+                result.error ?? "No se pudieron comparar los componentes.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rows = result.data.slice(0, 60);
+
+    return {
+      intent: "quote.compare.components",
+      entities: {
+        cotizacionActual: cotActual,
+        cotizacionAnterior: cotAnterior,
+      },
+      artifacts: [
+        {
+          type: "table",
+          title: `Comparación de Componentes (#${cotActual} vs #${cotAnterior})`,
+          data: { rows, total: result.data.length },
+        },
+      ],
+      limits:
+        result.data.length > 60
+          ? { truncated: true, reason: "Se recortó a 60 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Comparar minutajes entre dos cotizaciones ───────────
+export const quoteCompareMinutajesTool: ToolDefinition = {
+  id: "quote.compare.minutajes",
+  description:
+    "Compara los minutajes (tiempos de corte, costura, acabado y sus eficiencias) entre dos cotizaciones específicas.",
+  requiredParams: ["cotizacionActual", "cotizacionAnterior"],
+  examples: [
+    "compara minutajes entre 217442 y 170719",
+    "tiempos de producción entre ambas cotizaciones",
+    "minutajes 217442 vs 214864",
+  ],
+  execute: async (params): Promise<ToolResult> => {
+    const cotActual = Number(params.cotizacionActual);
+    const cotAnterior = Number(params.cotizacionAnterior);
+
+    if (!Number.isFinite(cotActual) || !Number.isFinite(cotAnterior)) {
+      return {
+        intent: "quote.compare.minutajes",
+        entities: {
+          cotizacionActual: params.cotizacionActual,
+          cotizacionAnterior: params.cotizacionAnterior,
+        },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Faltan IDs",
+            data: { message: "Necesito los IDs de ambas cotizaciones." },
+          },
+        ],
+      };
+    }
+
+    const result = await compararMinutajes(cotActual, cotAnterior);
+
+    if (!result.success || !result.data) {
+      return {
+        intent: "quote.compare.minutajes",
+        entities: {
+          cotizacionActual: cotActual,
+          cotizacionAnterior: cotAnterior,
+        },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Comparación no disponible",
+            data: {
+              message: result.error ?? "No se pudieron comparar los minutajes.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rows = result.data;
+
+    return {
+      intent: "quote.compare.minutajes",
+      entities: {
+        cotizacionActual: cotActual,
+        cotizacionAnterior: cotAnterior,
+      },
+      artifacts: [
+        {
+          type: "table",
+          title: `Comparación de Minutajes (#${cotActual} vs #${cotAnterior})`,
+          data: { rows, total: rows.length },
+        },
+      ],
+    };
+  },
+};
+
+// ── TOOL: Buscar cotización por ID ─────────────────────────────
+export const quoteSearchTool: ToolDefinition = {
+  id: "quote.search",
+  description:
+    "Busca una cotización por su ID numérico y devuelve su detalle completo.",
+  requiredParams: ["cotizacionId"],
+  examples: [
+    "buscar cotización 217442",
+    "existe la cotización 215000?",
+    "información de la 216881",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const cotizacionId = pickCotizacionId(params);
+    if (!cotizacionId) {
+      return {
+        intent: "quote.search",
+        entities: { cotizacionId: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta cotizacionId",
+            data: { message: "Necesito el ID de la cotización a buscar." },
+          },
+        ],
+      };
+    }
+
+    const result = await getDetalleCotizacion(cotizacionId, ctx.apiTrace);
+    if (!result.success) {
+      return {
+        intent: "quote.search",
+        entities: { cotizacionId },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Cotización no encontrada",
+            data: {
+              message:
+                result.message ??
+                `No se encontró la cotización #${cotizacionId}.`,
+            },
+          },
+        ],
+      };
+    }
+
+    const d0 = Array.isArray((result as any).data?.data)
+      ? (result as any).data.data[0]
+      : ((result as any).data?.[0] ?? (result as any).data);
+
+    const facts =
+      d0 && typeof d0 === "object"
+        ? { ...d0, TCODICOTI: d0.TCODICOTI ?? cotizacionId }
+        : { TCODICOTI: cotizacionId };
+
+    return {
+      intent: "quote.search",
+      entities: { cotizacionId },
+      artifacts: [
+        {
+          type: "facts",
+          title: `Cotización #${cotizacionId} encontrada`,
+          data: facts,
+        },
+      ],
+    };
+  },
+};
+
+// ── TOOL: Sugerir precio (análisis completo) ───────────────────
+export const quoteSuggestPriceTool: ToolDefinition = {
+  id: "quote.suggest.price",
+  description:
+    "Analiza la cotización comparándola con históricos (KPIs, componentes, minutajes) para sugerir un precio óptimo.",
+  requiredParams: ["cotizacionId"],
+  examples: [
+    "sugiere un precio para la 217442",
+    "precio óptimo para la cotización 217442",
+    "análisis de precio 217442",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const cotizacionId = pickCotizacionId(params);
+    if (!cotizacionId) {
+      return {
+        intent: "quote.suggest.price",
+        entities: { cotizacionId: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta cotizacionId",
+            data: { message: "Necesito el ID de la cotización." },
+          },
+        ],
+      };
+    }
+
+    // 1) Obtener detalle actual
+    const detalleResult = await getDetalleCotizacion(
+      cotizacionId,
+      ctx.apiTrace,
+    );
+    const d0 = detalleResult.success
+      ? Array.isArray((detalleResult as any).data?.data)
+        ? (detalleResult as any).data.data[0]
+        : ((detalleResult as any).data?.[0] ?? (detalleResult as any).data)
+      : null;
+
+    // 2) Ejecutar comparación completa (KPIs + componentes + minutajes)
+    const comparacion = await ejecutarComparacionCompleta(
+      cotizacionId,
+      "ESTILO_CLIENTE",
+    );
+
+    if (!comparacion.success || !comparacion.kpis) {
+      // Intentar con comparación por cliente si no hay estilo
+      const compCliente = await ejecutarComparacionCompleta(
+        cotizacionId,
+        "CLIENTE",
+      );
+      if (!compCliente.success || !compCliente.kpis) {
+        return {
+          intent: "quote.suggest.price",
+          entities: { cotizacionId },
+          artifacts: [
+            {
+              type: "warning",
+              title: "Sin datos históricos",
+              data: {
+                message:
+                  "No se encontraron cotizaciones históricas para comparar. No es posible sugerir un precio sin referencia.",
+              },
+            },
+            ...(d0
+              ? [
+                  {
+                    type: "facts" as const,
+                    title: "Datos actuales de la cotización",
+                    data: { ...d0, TCODICOTI: d0.TCODICOTI ?? cotizacionId },
+                  },
+                ]
+              : []),
+          ],
+        };
+      }
+      // Usar comparación por cliente
+      return buildSuggestResult(cotizacionId, d0, compCliente, "CLIENTE");
+    }
+
+    return buildSuggestResult(cotizacionId, d0, comparacion, "ESTILO_CLIENTE");
+  },
+};
+
+function buildSuggestResult(
+  cotizacionId: number,
+  detalle: any,
+  comparacion: any,
+  grupo: string,
+): ToolResult {
+  const kpis = comparacion.kpis;
+  const actual = kpis.cotizacionActual;
+  const anterior = kpis.cotizacionAnterior;
+  const diff = kpis.diferencias;
+
+  // Calcular markup actual y anterior
+  const markupActual =
+    actual.costoPonderado > 0
+      ? ((actual.precioFob - actual.costoPonderado) / actual.costoPonderado) *
+        100
+      : null;
+  const markupAnterior =
+    anterior.costoPonderado > 0
+      ? ((anterior.precioFob - anterior.costoPonderado) /
+          anterior.costoPonderado) *
+        100
+      : null;
+
+  // Datos para que el modelo razone
+  const analisis: Record<string, any> = {
+    cotizacionId,
+    grupo_comparacion: grupo,
+    cotizacion_base: comparacion.candidatoSeleccionado?.COTIZACION_ID,
+    total_candidatos: comparacion.totalCandidatos,
+    precioFob_actual: actual.precioFob,
+    costoPonderado_actual: actual.costoPonderado,
+    markup_actual_pct: markupActual != null ? +markupActual.toFixed(2) : "N/D",
+    precioFob_anterior: anterior.precioFob,
+    costoPonderado_anterior: anterior.costoPonderado,
+    markup_anterior_pct:
+      markupAnterior != null ? +markupAnterior.toFixed(2) : "N/D",
+    diferencia_precioFob: diff.precioFob,
+    diferencia_costoPonderado: diff.costoPonderado,
+    diferencia_markup_pts: diff.markup,
+    prendasEstimadas_actual: actual.prendasEstimadas,
+    prendasEstimadas_anterior: anterior.prendasEstimadas,
+  };
+
+  // Agregar info de detalle si existe
+  if (detalle) {
+    analisis.cliente = detalle.TDESCDIVICLIEABRV ?? detalle.TDESCCLIE ?? null;
+    analisis.estilo_cliente = detalle.TCODIESTICLIE ?? null;
+    analisis.temporada = detalle.TCODITEMP ?? null;
+    analisis.estado = detalle.TDESCESTA ?? null;
+  }
+
+  const artifacts: any[] = [
+    {
+      type: "facts",
+      title: `Análisis completo para sugerencia de precio (${grupo})`,
+      data: analisis,
+    },
+  ];
+
+  // Agregar componentes si existen
+  if (comparacion.componentes && comparacion.componentes.length > 0) {
+    artifacts.push({
+      type: "table",
+      title: `Comparación de Componentes (vs #${comparacion.candidatoSeleccionado?.COTIZACION_ID})`,
+      data: {
+        rows: comparacion.componentes,
+        total: comparacion.componentes.length,
+      },
+    });
+  }
+
+  // Agregar minutajes si existen
+  if (comparacion.minutajes && comparacion.minutajes.length > 0) {
+    artifacts.push({
+      type: "table",
+      title: `Comparación de Minutajes (vs #${comparacion.candidatoSeleccionado?.COTIZACION_ID})`,
+      data: {
+        rows: comparacion.minutajes,
+        total: comparacion.minutajes.length,
+      },
+    });
+  }
+
+  return {
+    intent: "quote.suggest.price",
+    entities: { cotizacionId },
+    artifacts,
+  };
+}
+
+// ── TOOL: Calcular markup ──────────────────────────────────────
+export const quoteCalcMarkupTool: ToolDefinition = {
+  id: "quote.calc.markup",
+  description:
+    "Calcula el markup y métricas de rentabilidad dados un precio FOB y un costo ponderado.",
+  requiredParams: ["precioFob", "costoPonderado"],
+  examples: [
+    "calcula markup con precio 12.50 y costo 9.80",
+    "markup de FOB 15 y costo 11.5",
+    "si el precio es 14 y el costo 10, ¿cuánto es el markup?",
+  ],
+  execute: async (params): Promise<ToolResult> => {
+    const precioFob = Number(params.precioFob);
+    const costoPonderado = Number(params.costoPonderado);
+
+    if (
+      !Number.isFinite(precioFob) ||
+      !Number.isFinite(costoPonderado) ||
+      precioFob < 0 ||
+      costoPonderado < 0
+    ) {
+      return {
+        intent: "quote.calc.markup",
+        entities: {
+          precioFob: params.precioFob,
+          costoPonderado: params.costoPonderado,
+        },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Parámetros inválidos",
+            data: {
+              message:
+                "Necesito un precio FOB y un costo ponderado válidos (números positivos).",
+            },
+          },
+        ],
+      };
+    }
+
+    if (costoPonderado === 0) {
+      return {
+        intent: "quote.calc.markup",
+        entities: { precioFob, costoPonderado },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Costo es cero",
+            data: {
+              message:
+                "El costo ponderado es $0. La cotización aún no ha sido costeada, no se puede calcular markup.",
+            },
+          },
+        ],
+      };
+    }
+
+    const markup = ((precioFob - costoPonderado) / costoPonderado) * 100;
+    const ganancia = precioFob - costoPonderado;
+    const ratio = precioFob / costoPonderado;
+
+    // Clasificación de salud del markup
+    let salud: string;
+    if (markup < 0) salud = "❌ Negativo (pérdida)";
+    else if (markup < 10) salud = "⚠️ Bajo (< 10%)";
+    else if (markup < 15) salud = "⚠️ Ajustado (10-15%)";
+    else if (markup <= 25) salud = "✅ Saludable (15-25%)";
+    else if (markup <= 40) salud = "✅ Bueno (25-40%)";
+    else salud = "🔵 Alto (> 40%)";
+
+    return {
+      intent: "quote.calc.markup",
+      entities: { precioFob, costoPonderado },
+      artifacts: [
+        {
+          type: "facts",
+          title: "Cálculo de Markup",
+          data: {
+            "Precio FOB": `$${precioFob.toFixed(2)}`,
+            "Costo Ponderado": `$${costoPonderado.toFixed(2)}`,
+            "Ganancia por unidad": `$${ganancia.toFixed(2)}`,
+            "Markup (%)": `${markup.toFixed(2)}%`,
+            "Ratio Precio/Costo": ratio.toFixed(3),
+            Evaluación: salud,
+          },
         },
       ],
     };

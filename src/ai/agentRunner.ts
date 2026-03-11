@@ -62,6 +62,24 @@ Tienes funciones para consultar datos reales del sistema. Úsalas siempre que ne
 - Si NO hay cotizacionId en el contexto y el usuario no lo menciona, pídelo amablemente.
 - Puedes encadenar varias herramientas si el usuario pide un análisis completo.
 
+## Flujo de Comparación (IMPORTANTE)
+Para CUALQUIER comparación, sigue estos pasos:
+1. **Primero** llama \`listar_candidatos(cotizacionId, grupo)\` con el grupo adecuado:
+   - ESTILO_CLIENTE: mismo producto/estilo del cliente
+   - ESTILO_NETTALCO: mismo estilo Nettalco
+   - CLIENTE: cualquier estilo del mismo cliente
+   - GLOBAL: toda la base de datos
+2. **Luego** usa el ID del mejor candidato sugerido para llamar las comparaciones específicas:
+   - \`comparar_kpis(cotActual, cotAnterior)\` → KPIs financieros
+   - \`comparar_componentes(cotActual, cotAnterior)\` → avíos y telas
+   - \`comparar_minutajes(cotActual, cotAnterior)\` → tiempos de producción
+3. Solo llama las comparaciones que el usuario pidió. Si pide "comparar componentes", solo llama listar_candidatos + comparar_componentes.
+4. Si el usuario pide una comparación completa o general, llama las 3 (kpis + componentes + minutajes).
+
+- Para sugerir precio, usa \`sugerir_precio\` que ejecuta el análisis completo automáticamente.
+- Para calcular markup con valores hipotéticos, usa \`calcular_markup\`.
+- Para buscar cualquier cotización por ID, usa \`buscar_cotizacion\`.
+
 # Formato de Respuesta
 - Español, conciso, máximo 10 líneas para respuestas normales.
 - Para **comparaciones de KPIs** usa EXACTAMENTE este formato:
@@ -150,15 +168,104 @@ const AGENT_TOOLS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "comparar_por_estilo_cliente",
+      name: "listar_candidatos",
       description:
-        "Compara KPIs, minutajes y componentes de la cotización con cotizaciones históricas del MISMO ESTILO del cliente. Ideal para ver evolución del mismo producto.",
+        "Lista las cotizaciones candidatas para comparación histórica por grupo. Siempre llama esta función PRIMERO antes de comparar KPIs, componentes o minutajes. Grupos: ESTILO_CLIENTE (mismo producto), ESTILO_NETTALCO (mismo estilo Nettalco), CLIENTE (mismo cliente), GLOBAL (toda la BD).",
       parameters: {
         type: "object",
         properties: {
           cotizacionId: {
             type: "number",
             description: "ID de la cotización actual",
+          },
+          grupo: {
+            type: "string",
+            enum: ["ESTILO_CLIENTE", "ESTILO_NETTALCO", "CLIENTE", "GLOBAL"],
+            description: "Grupo de comparación",
+          },
+        },
+        required: ["cotizacionId", "grupo"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "comparar_kpis",
+      description:
+        "Compara KPIs (Precio FOB, Costo Ponderado, Markup, Prendas Estimadas) entre dos cotizaciones específicas. Requiere los IDs de ambas cotizaciones (usar listar_candidatos primero para obtener el ID anterior).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionActual: {
+            type: "number",
+            description: "ID de la cotización actual",
+          },
+          cotizacionAnterior: {
+            type: "number",
+            description: "ID de la cotización anterior/base a comparar",
+          },
+        },
+        required: ["cotizacionActual", "cotizacionAnterior"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "comparar_componentes",
+      description:
+        "Compara los componentes (avíos, telas, hilos, botones, etc.) entre dos cotizaciones específicas. Requiere los IDs de ambas cotizaciones.",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionActual: {
+            type: "number",
+            description: "ID de la cotización actual",
+          },
+          cotizacionAnterior: {
+            type: "number",
+            description: "ID de la cotización anterior/base a comparar",
+          },
+        },
+        required: ["cotizacionActual", "cotizacionAnterior"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "comparar_minutajes",
+      description:
+        "Compara los minutajes (tiempos de corte, costura, acabado y eficiencias) entre dos cotizaciones específicas. Requiere los IDs de ambas cotizaciones.",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionActual: {
+            type: "number",
+            description: "ID de la cotización actual",
+          },
+          cotizacionAnterior: {
+            type: "number",
+            description: "ID de la cotización anterior/base a comparar",
+          },
+        },
+        required: ["cotizacionActual", "cotizacionAnterior"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_cotizacion",
+      description:
+        "Busca una cotización por su ID numérico y devuelve su detalle completo (cliente, estilo, precio, costo, temporada, etc.). Útil cuando el usuario quiere consultar una cotización distinta a la que está viendo.",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización a buscar",
           },
         },
         required: ["cotizacionId"],
@@ -168,15 +275,15 @@ const AGENT_TOOLS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "comparar_por_cliente",
+      name: "sugerir_precio",
       description:
-        "Compara KPIs de la cotización con todas las cotizaciones históricas del MISMO CLIENTE (cualquier estilo). Útil para ver rangos de precios con ese cliente.",
+        "Analiza la cotización actual comparándola con cotizaciones históricas (KPIs, componentes, minutajes) y proporciona datos completos para que el modelo sugiera un precio FOB óptimo. Ejecuta comparación por estilo del cliente.",
       parameters: {
         type: "object",
         properties: {
           cotizacionId: {
             type: "number",
-            description: "ID de la cotización actual",
+            description: "ID de la cotización a analizar",
           },
         },
         required: ["cotizacionId"],
@@ -186,62 +293,22 @@ const AGENT_TOOLS: ChatTool[] = [
   {
     type: "function",
     function: {
-      name: "comparar_global",
+      name: "calcular_markup",
       description:
-        "Compara KPIs de la cotización con TODAS las cotizaciones históricas de la base de datos (cualquier cliente/estilo). Da una visión general del mercado.",
+        "Calcula el markup (%) y métricas de rentabilidad a partir de un precio FOB y un costo ponderado. Fórmula: Markup = ((PrecioFOB - CostoPonderado) / CostoPonderado) × 100. Útil para simular escenarios de precio.",
       parameters: {
         type: "object",
         properties: {
-          cotizacionId: {
+          precioFob: {
             type: "number",
-            description: "ID de la cotización actual",
+            description: "Precio FOB en dólares",
+          },
+          costoPonderado: {
+            type: "number",
+            description: "Costo ponderado en dólares",
           },
         },
-        required: ["cotizacionId"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "comparar_dos_cotizaciones",
-      description:
-        "Compara directamente los KPIs entre DOS cotizaciones específicas proporcionando ambos IDs.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionA: {
-            type: "number",
-            description: "ID de la primera cotización",
-          },
-          cotizacionB: {
-            type: "number",
-            description: "ID de la segunda cotización",
-          },
-        },
-        required: ["cotizacionA", "cotizacionB"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "comparar_colores",
-      description:
-        "Compara los colores entre dos cotizaciones: muestra los comunes, los exclusivos de cada una y las diferencias.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionA: {
-            type: "number",
-            description: "ID de la primera cotización",
-          },
-          cotizacionB: {
-            type: "number",
-            description: "ID de la segunda cotización",
-          },
-        },
-        required: ["cotizacionA", "cotizacionB"],
+        required: ["precioFob", "costoPonderado"],
       },
     },
   },
@@ -252,11 +319,13 @@ const FUNCTION_TO_TOOL_ID: Record<string, string> = {
   obtener_detalle: "quote.detail",
   obtener_colores: "quote.colors",
   obtener_componentes: "quote.components",
-  comparar_por_estilo_cliente: "quote.compare.style",
-  comparar_por_cliente: "quote.compare.client",
-  comparar_global: "quote.compare.global",
-  comparar_dos_cotizaciones: "quote.compare.two",
-  comparar_colores: "compare.colors",
+  listar_candidatos: "quote.compare.candidates",
+  comparar_kpis: "quote.compare.kpis",
+  comparar_componentes: "quote.compare.components",
+  comparar_minutajes: "quote.compare.minutajes",
+  buscar_cotizacion: "quote.search",
+  sugerir_precio: "quote.suggest.price",
+  calcular_markup: "quote.calc.markup",
 };
 
 // ── Formatear resultados de herramientas para el modelo ────────
@@ -346,7 +415,7 @@ function formatToolResultForModel(toolResult: ToolResult): string {
 }
 
 // ── Agente principal ───────────────────────────────────────────
-const MAX_TOOL_ITERATIONS = 3;
+const MAX_TOOL_ITERATIONS = 5;
 
 export interface AgentResult {
   output: string;
