@@ -1,0 +1,320 @@
+{
+  "name": "Chatbot Cotizaciones - Demo v2",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chatbot",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Webhook Entrada",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "chatbot-entrada"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "mensaje",
+              "name": "mensaje",
+              "value": "={{ $json.body.mensaje || 'hola' }}",
+              "type": "string"
+            },
+            {
+              "id": "cotizacionId",
+              "name": "cotizacionId",
+              "value": "={{ $json.body.cotizacionId || 216834 }}",
+              "type": "number"
+            },
+            {
+              "id": "cliente",
+              "name": "cliente",
+              "value": "={{ $json.body.cliente || 'Cliente Test' }}",
+              "type": "string"
+            },
+            {
+              "id": "temporada",
+              "name": "temporada",
+              "value": "={{ $json.body.temporada || '2024-SS' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-variables-1",
+      "name": "Extraer Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "saludo",
+              "leftValue": "={{ $json.mensaje.toLowerCase() }}",
+              "rightValue": "hola|hello|hi|buenas|buenos",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "if-saludo",
+      "name": "¿Es saludo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "respuesta",
+              "name": "respuesta",
+              "value": "¡Hola! Soy tu asistente de cotizaciones textiles. ¿En qué te puedo ayudar hoy?\n\nPuedes preguntarme sobre:\n• 📊 Datos de la cotización\n• 📈 Comparación con similares\n• 🔍 Análisis de tendencias\n• 💡 Recomendaciones de precios",
+              "type": "string"
+            },
+            {
+              "id": "provider",
+              "name": "provider",
+              "value": "n8n-conversational",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "respuesta-saludo",
+      "name": "Respuesta Saludo",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "url": "=http://localhost:5066/api/ai/cotizaciones/sugerencias",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"mensaje\": \"{{ $json.mensaje }}\",\n  \"cotizacionId\": {{ $json.cotizacionId }},\n  \"cliente\": \"{{ $json.cliente }}\",\n  \"temporada\": \"{{ $json.temporada }}\",\n  \"detalleCotizacion\": {\n    \"TCODICOTI\": {{ $json.cotizacionId }},\n    \"TABRVCLIE\": \"{{ $json.cliente }}\",\n    \"TCODITEMP\": \"{{ $json.temporada }}\",\n    \"TPRECCOTI\": 0,\n    \"TCOSTPOND\": 9.77,\n    \"TMKUPOBJE\": 5\n  }\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "http-backend",
+      "name": "Llamar Backend IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "respuesta",
+              "name": "respuesta",
+              "value": "={{ $json.reply || 'No se pudo obtener respuesta' }}",
+              "type": "string"
+            },
+            {
+              "id": "provider",
+              "name": "provider",
+              "value": "={{ $json.provider || 'backend' }}",
+              "type": "string"
+            },
+            {
+              "id": "similares",
+              "name": "similares",
+              "value": "={{ $json.similares.length || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "confidence",
+              "name": "confidence",
+              "value": "={{ $json.confidence || 0 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "procesar-respuesta",
+      "name": "Procesar Respuesta IA",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstEntryJson",
+        "options": {}
+      },
+      "id": "response-1",
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error",
+              "name": "error",
+              "value": "={{ $json.error?.message || 'Error desconocido' }}",
+              "type": "string"
+            },
+            {
+              "id": "respuesta",
+              "name": "respuesta",
+              "value": "Lo siento, ocurrió un error al procesar tu consulta. Por favor intenta de nuevo.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "error-handler",
+      "name": "Manejar Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [1050, 550]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstEntryJson",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "response-error",
+      "name": "Responder Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1250, 550]
+    }
+  ],
+  "connections": {
+    "Webhook Entrada": {
+      "main": [
+        [
+          {
+            "node": "Extraer Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Variables": {
+      "main": [
+        [
+          {
+            "node": "¿Es saludo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es saludo?": {
+      "main": [
+        [
+          {
+            "node": "Respuesta Saludo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Llamar Backend IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta Saludo": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llamar Backend IA": {
+      "main": [
+        [
+          {
+            "node": "Procesar Respuesta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Manejar Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar Respuesta IA": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manejar Error": {
+      "main": [
+        [
+          {
+            "node": "Responder Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-11-13T00:00:00.000Z",
+  "versionId": "1"
+}
