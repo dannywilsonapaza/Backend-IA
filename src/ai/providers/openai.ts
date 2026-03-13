@@ -22,6 +22,11 @@ function getClient(): OpenAI {
   return client;
 }
 
+/** Expone el cliente para la Assistants API */
+export function getOpenAIClient(): OpenAI {
+  return getClient();
+}
+
 export async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
@@ -60,12 +65,14 @@ export async function createChatCompletion(
   messages: ChatMessage[],
   tools?: ChatTool[],
   maxTokens = 2000,
+  modelOverride?: string,
 ): Promise<ChatCompletion> {
   const openai = getClient();
-  const isReasoningModel = /^o\d/i.test(config.openaiModel);
+  const model = modelOverride || config.openaiModel;
+  const isReasoningModel = /^o\d/i.test(model);
 
   return openai.chat.completions.create({
-    model: config.openaiModel,
+    model,
     messages,
     ...(tools && tools.length > 0 ? { tools } : {}),
     ...(isReasoningModel

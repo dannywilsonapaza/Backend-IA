@@ -1,320 +1,55 @@
 /**
- * Agent Runner — Motor de Function Calling de OpenAI
+ * Agent Runner — Assistants API de OpenAI (Threads + Runs)
  *
- * Reemplaza la heurística manual (selectTool) por function calling nativo.
- * El modelo decide qué herramienta usar, extrae parámetros, y genera la
- * respuesta final con los datos reales.
+ * Usa la Assistants API para gestionar el historial de conversación
+ * en los servidores de OpenAI (Threads) y ejecutar tools vía Runs.
+ * La memoria persiste entre reinicios del servidor.
  */
-import {
-  createChatCompletion,
-  type ChatMessage,
-  type ChatTool,
-} from "./providers/openai.js";
+import { getOpenAIClient } from "./providers/openai.js";
+import { config } from "../config/env.js";
 import { getToolById } from "../tools/toolsRegistry.js";
 import type { ToolExecutionContext } from "../tools/types.js";
 import type { ToolResult, UiContext } from "../types/index.js";
 
-// ── Historial de conversación por sesión ───────────────────────
-type SessionHistory = { messages: ChatMessage[]; updatedAt: number };
-const sessions = new Map<string, SessionHistory>();
+// ── Mapeo sesión → thread ──────────────────────────────────────
+const sessionToThread = new Map<
+  string,
+  { threadId: string; updatedAt: number }
+>();
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const MAX_MESSAGES = 40;
-
-function getHistory(sessionId: string): ChatMessage[] {
-  const s = sessions.get(sessionId);
-  if (s && Date.now() - s.updatedAt < SESSION_TTL_MS) return [...s.messages];
-  sessions.delete(sessionId);
-  return [];
-}
-
-function saveHistory(sessionId: string, messages: ChatMessage[]): void {
-  const trimmed =
-    messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages;
-  sessions.set(sessionId, { messages: trimmed, updatedAt: Date.now() });
-}
 
 // Limpieza periódica de sesiones expiradas
 const cleanupTimer = setInterval(
   () => {
     const now = Date.now();
-    for (const [id, s] of sessions) {
-      if (now - s.updatedAt > SESSION_TTL_MS) sessions.delete(id);
+    for (const [id, s] of sessionToThread) {
+      if (now - s.updatedAt > SESSION_TTL_MS) sessionToThread.delete(id);
     }
   },
   5 * 60 * 1000,
 );
 cleanupTimer.unref();
 
-// ── System Prompt del Agente ───────────────────────────────────
-const AGENT_SYSTEM_PROMPT = `# Rol
-Eres el asistente experto de cotizaciones textiles de **Nettalco SA**. Responde siempre en español.
+async function getOrCreateThread(sessionId: string): Promise<string> {
+  const existing = sessionToThread.get(sessionId);
+  if (existing && Date.now() - existing.updatedAt < SESSION_TTL_MS) {
+    existing.updatedAt = Date.now();
+    return existing.threadId;
+  }
 
-# Conocimiento de Negocio
-- Markup (%) = ((Precio FOB − Costo Ponderado) / Costo Ponderado) × 100
-- Un markup saludable en textil B2B: 15-25%
-- Si el costo sube pero el precio baja → rentabilidad comprometida
-- Mayor volumen puede justificar menor markup por economía de escala
-- Si precio/costo = $0 → cotización aún no costeada (indicarlo, no analizar números)
+  const openai = getOpenAIClient();
+  const thread = await openai.beta.threads.create();
+  sessionToThread.set(sessionId, {
+    threadId: thread.id,
+    updatedAt: Date.now(),
+  });
+  console.log(
+    `[agent] Nuevo thread creado: ${thread.id} para sesión ${sessionId}`,
+  );
+  return thread.id;
+}
 
-# Herramientas
-Tienes funciones para consultar datos reales del sistema. Úsalas siempre que necesites datos concretos.
-- Si el usuario está viendo una cotización (cotizacionId en el contexto), úsala directamente SIN preguntar el ID.
-- Si NO hay cotizacionId en el contexto y el usuario no lo menciona, pídelo amablemente.
-- Puedes encadenar varias herramientas si el usuario pide un análisis completo.
-
-## Flujo de Comparación (IMPORTANTE)
-Para CUALQUIER comparación, sigue estos pasos:
-1. **Primero** llama \`listar_candidatos(cotizacionId, grupo)\` con el grupo adecuado:
-   - ESTILO_CLIENTE: mismo producto/estilo del cliente
-   - ESTILO_NETTALCO: mismo estilo Nettalco
-   - CLIENTE: cualquier estilo del mismo cliente
-   - GLOBAL: toda la base de datos
-2. **Luego** usa el ID del mejor candidato sugerido para llamar las comparaciones específicas:
-   - \`comparar_kpis(cotActual, cotAnterior)\` → KPIs financieros
-   - \`comparar_componentes(cotActual, cotAnterior)\` → avíos y telas
-   - \`comparar_minutajes(cotActual, cotAnterior)\` → tiempos de producción
-3. Solo llama las comparaciones que el usuario pidió. Si pide "comparar componentes", solo llama listar_candidatos + comparar_componentes.
-4. Si el usuario pide una comparación completa o general, llama las 3 (kpis + componentes + minutajes).
-
-- Para sugerir precio, usa \`sugerir_precio\` que ejecuta el análisis completo automáticamente.
-- Para calcular markup con valores hipotéticos, usa \`calcular_markup\`.
-- Para buscar cualquier cotización por ID, usa \`buscar_cotizacion\`.
-
-# Formato de Respuesta
-- Español, conciso, máximo 10 líneas para respuestas normales.
-- Para **comparaciones de KPIs** usa EXACTAMENTE este formato:
-
-📊 **Comparación por [Estilo Cliente / Cliente / Global]**
-
-🔍 Se encontraron **X cotizaciones** de temporadas anteriores.
-✅ Se seleccionó la cotización **#ID (TEMPORADA)** como la más relevante.
-
-📈 **Comparación de KPIs:**
-
-| Indicador | Actual | Anterior | Diferencia |
-|-----------|--------|----------|------------|
-| **Precio FOB** | $X.XX | $X.XX | +/-$X.XX |
-| **Costo Ponderado** | $X.XX | $X.XX | +/-$X.XX |
-| **Markup** | X.X% | X.X% | +/-X.X pts |
-| **Prendas Est.** | X | X | +/-X |
-
-💡 **Análisis:** [máximo 3 oraciones, justifica técnicamente las variaciones]
-
-- Para **dato específico** (ej. "¿cuál es el costo?"): 1-2 líneas, SOLO ese dato.
-- Para **detalle/resumen**: lista con viñetas de todos los campos.
-- Para **colores/componentes**: tabla o lista resumida (máx 10 ítems, indicar total).
-
-# Restricciones
-- Solo responde sobre cotizaciones y temas de la empresa.
-- Nunca inventes datos. Si algo no está disponible muestra "N/D".
-- No menciones que eres un modelo de IA.`;
-
-// ── Definición de herramientas para OpenAI ─────────────────────
-const AGENT_TOOLS: ChatTool[] = [
-  {
-    type: "function",
-    function: {
-      name: "obtener_detalle",
-      description:
-        "Obtiene el detalle completo de una cotización: cliente, estado, precio FOB, costo ponderado, markup, estilo Nettalco, estilo cliente, temporada, prendas estimadas, fechas, etc.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionId: {
-            type: "number",
-            description: "ID numérico de la cotización",
-          },
-        },
-        required: ["cotizacionId"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "obtener_colores",
-      description:
-        "Obtiene los colores de una cotización: tipo, nombre, número, porcentaje de participación y tono.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionId: {
-            type: "number",
-            description: "ID numérico de la cotización",
-          },
-        },
-        required: ["cotizacionId"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "obtener_componentes",
-      description:
-        "Obtiene los componentes (avíos) de una cotización: telas, hilos, botones, cierres, etc. Incluye tipo, descripción, ítem y consumo neto.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionId: {
-            type: "number",
-            description: "ID numérico de la cotización",
-          },
-        },
-        required: ["cotizacionId"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "listar_candidatos",
-      description:
-        "Lista las cotizaciones candidatas para comparación histórica por grupo. Siempre llama esta función PRIMERO antes de comparar KPIs, componentes o minutajes. Grupos: ESTILO_CLIENTE (mismo producto), ESTILO_NETTALCO (mismo estilo Nettalco), CLIENTE (mismo cliente), GLOBAL (toda la BD).",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionId: {
-            type: "number",
-            description: "ID de la cotización actual",
-          },
-          grupo: {
-            type: "string",
-            enum: ["ESTILO_CLIENTE", "ESTILO_NETTALCO", "CLIENTE", "GLOBAL"],
-            description: "Grupo de comparación",
-          },
-        },
-        required: ["cotizacionId", "grupo"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "comparar_kpis",
-      description:
-        "Compara KPIs (Precio FOB, Costo Ponderado, Markup, Prendas Estimadas) entre dos cotizaciones específicas. Requiere los IDs de ambas cotizaciones (usar listar_candidatos primero para obtener el ID anterior).",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionActual: {
-            type: "number",
-            description: "ID de la cotización actual",
-          },
-          cotizacionAnterior: {
-            type: "number",
-            description: "ID de la cotización anterior/base a comparar",
-          },
-        },
-        required: ["cotizacionActual", "cotizacionAnterior"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "comparar_componentes",
-      description:
-        "Compara los componentes (avíos, telas, hilos, botones, etc.) entre dos cotizaciones específicas. Requiere los IDs de ambas cotizaciones.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionActual: {
-            type: "number",
-            description: "ID de la cotización actual",
-          },
-          cotizacionAnterior: {
-            type: "number",
-            description: "ID de la cotización anterior/base a comparar",
-          },
-        },
-        required: ["cotizacionActual", "cotizacionAnterior"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "comparar_minutajes",
-      description:
-        "Compara los minutajes (tiempos de corte, costura, acabado y eficiencias) entre dos cotizaciones específicas. Requiere los IDs de ambas cotizaciones.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionActual: {
-            type: "number",
-            description: "ID de la cotización actual",
-          },
-          cotizacionAnterior: {
-            type: "number",
-            description: "ID de la cotización anterior/base a comparar",
-          },
-        },
-        required: ["cotizacionActual", "cotizacionAnterior"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "buscar_cotizacion",
-      description:
-        "Busca una cotización por su ID numérico y devuelve su detalle completo (cliente, estilo, precio, costo, temporada, etc.). Útil cuando el usuario quiere consultar una cotización distinta a la que está viendo.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionId: {
-            type: "number",
-            description: "ID numérico de la cotización a buscar",
-          },
-        },
-        required: ["cotizacionId"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "sugerir_precio",
-      description:
-        "Analiza la cotización actual comparándola con cotizaciones históricas (KPIs, componentes, minutajes) y proporciona datos completos para que el modelo sugiera un precio FOB óptimo. Ejecuta comparación por estilo del cliente.",
-      parameters: {
-        type: "object",
-        properties: {
-          cotizacionId: {
-            type: "number",
-            description: "ID de la cotización a analizar",
-          },
-        },
-        required: ["cotizacionId"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "calcular_markup",
-      description:
-        "Calcula el markup (%) y métricas de rentabilidad a partir de un precio FOB y un costo ponderado. Fórmula: Markup = ((PrecioFOB - CostoPonderado) / CostoPonderado) × 100. Útil para simular escenarios de precio.",
-      parameters: {
-        type: "object",
-        properties: {
-          precioFob: {
-            type: "number",
-            description: "Precio FOB en dólares",
-          },
-          costoPonderado: {
-            type: "number",
-            description: "Costo ponderado en dólares",
-          },
-        },
-        required: ["precioFob", "costoPonderado"],
-      },
-    },
-  },
-];
-
-// Mapeo: nombre de función OpenAI → tool ID interno
+// ── Mapeo de funciones OpenAI → tool ID interno ────────────────
 const FUNCTION_TO_TOOL_ID: Record<string, string> = {
   obtener_detalle: "quote.detail",
   obtener_colores: "quote.colors",
@@ -414,7 +149,7 @@ function formatToolResultForModel(toolResult: ToolResult): string {
   return parts.join("\n") || "Sin datos disponibles.";
 }
 
-// ── Agente principal ───────────────────────────────────────────
+// ── Agente principal (Assistants API) ──────────────────────────
 const MAX_TOOL_ITERATIONS = 5;
 
 export interface AgentResult {
@@ -435,104 +170,143 @@ export async function runAgent(args: {
   uiContext?: UiContext;
   traceId: string;
 }): Promise<AgentResult> {
-  const history = getHistory(args.sessionId);
+  const openai = getOpenAIClient();
+  const assistantId = config.openaiAssistantId;
 
-  // Inyectar contexto de UI como parte del mensaje del usuario
+  if (!assistantId) {
+    throw new Error(
+      "OPENAI_ASSISTANT_ID no configurado. Ejecuta: npx tsx scripts/setup-assistant.ts",
+    );
+  }
+
+  const threadId = await getOrCreateThread(args.sessionId);
+
+  // Construir mensaje del usuario con contexto de UI
   let userContent = args.chatInput;
   if (args.uiContext?.cotizacionId) {
     userContent = `[Contexto: el usuario está viendo la cotización #${args.uiContext.cotizacionId}]\n${args.chatInput}`;
   }
-  history.push({ role: "user", content: userContent });
 
-  // Construir mensajes completos (system + historial)
-  const buildMessages = (): ChatMessage[] => [
-    { role: "system", content: AGENT_SYSTEM_PROMPT },
-    ...history,
-  ];
+  // Agregar mensaje al thread
+  await openai.beta.threads.messages.create(threadId, {
+    role: "user",
+    content: userContent,
+  });
+
+  // Crear el Run
+  let run = await openai.beta.threads.runs.create(threadId, {
+    assistant_id: assistantId,
+  });
 
   const toolResults: ToolResult[] = [];
   const apiTrace: any[] = [];
   let iterations = 0;
 
-  // Primera llamada
-  let response = await createChatCompletion(buildMessages(), AGENT_TOOLS, 2000);
-  let choice = response.choices[0];
+  // Loop: Esperar a que el Run termine o pida tools
+  while (iterations < MAX_TOOL_ITERATIONS) {
+    // Polling del Run hasta que cambie de estado
+    run = await pollRunUntilActionable(openai, threadId, run.id);
 
-  // Loop de function calling
-  while (
-    choice.message.tool_calls &&
-    choice.message.tool_calls.length > 0 &&
-    iterations < MAX_TOOL_ITERATIONS
-  ) {
-    iterations++;
-
-    // Agregar mensaje del asistente (con tool_calls) al historial
-    history.push({
-      role: "assistant",
-      content: choice.message.content ?? null,
-      tool_calls: choice.message.tool_calls,
-    } as ChatMessage);
-
-    // Ejecutar cada tool call
-    for (const toolCall of choice.message.tool_calls) {
-      const fnName = toolCall.function.name;
-      let fnArgs: Record<string, any>;
-      try {
-        fnArgs = JSON.parse(toolCall.function.arguments);
-      } catch {
-        fnArgs = {};
-      }
-
-      const toolId = FUNCTION_TO_TOOL_ID[fnName];
-      let resultContent: string;
-
-      if (toolId) {
-        const tool = getToolById(toolId);
-        if (tool) {
-          try {
-            const ctx: ToolExecutionContext = {
-              sessionId: args.sessionId,
-              chatInput: args.chatInput,
-              uiContext: args.uiContext,
-              traceId: args.traceId,
-              apiTrace,
-            };
-            console.log(`[agent] Ejecutando: ${fnName} → ${toolId}`, fnArgs);
-            const toolResult = await tool.execute(fnArgs, ctx);
-            toolResults.push(toolResult);
-            resultContent = formatToolResultForModel(toolResult);
-          } catch (err: any) {
-            resultContent = `Error ejecutando ${fnName}: ${err?.message || "Error desconocido"}`;
-            console.error(`[agent] Error en ${toolId}:`, err?.message);
-          }
-        } else {
-          resultContent = `Herramienta ${toolId} no encontrada en el registro.`;
-        }
-      } else {
-        resultContent = `Función ${fnName} no reconocida.`;
-      }
-
-      // Agregar resultado al historial
-      history.push({
-        role: "tool",
-        tool_call_id: toolCall.id,
-        content: resultContent,
-      } as ChatMessage);
+    if (run.status === "completed") {
+      break;
     }
 
-    // Siguiente llamada con los resultados de las herramientas
-    response = await createChatCompletion(buildMessages(), AGENT_TOOLS, 2000);
-    choice = response.choices[0];
+    if (run.status === "requires_action") {
+      iterations++;
+      const toolCalls =
+        run.required_action?.submit_tool_outputs?.tool_calls || [];
+
+      const toolOutputs: Array<{ tool_call_id: string; output: string }> = [];
+
+      for (const toolCall of toolCalls) {
+        const fnName = toolCall.function.name;
+        let fnArgs: Record<string, any>;
+        try {
+          fnArgs = JSON.parse(toolCall.function.arguments);
+        } catch {
+          fnArgs = {};
+        }
+
+        const toolId = FUNCTION_TO_TOOL_ID[fnName];
+        let resultContent: string;
+
+        if (toolId) {
+          const tool = getToolById(toolId);
+          if (tool) {
+            try {
+              const ctx: ToolExecutionContext = {
+                sessionId: args.sessionId,
+                chatInput: args.chatInput,
+                uiContext: args.uiContext,
+                traceId: args.traceId,
+                apiTrace,
+              };
+              console.log(`[agent] Ejecutando: ${fnName} → ${toolId}`, fnArgs);
+              const toolResult = await tool.execute(fnArgs, ctx);
+              toolResults.push(toolResult);
+              resultContent = formatToolResultForModel(toolResult);
+            } catch (err: any) {
+              resultContent = `Error ejecutando ${fnName}: ${err?.message || "Error desconocido"}`;
+              console.error(`[agent] Error en ${toolId}:`, err?.message);
+            }
+          } else {
+            resultContent = `Herramienta ${toolId} no encontrada en el registro.`;
+          }
+        } else {
+          resultContent = `Función ${fnName} no reconocida.`;
+        }
+
+        toolOutputs.push({
+          tool_call_id: toolCall.id,
+          output: resultContent,
+        });
+      }
+
+      // Enviar resultados de tools y continuar el Run
+      run = await openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
+        tool_outputs: toolOutputs,
+      });
+      continue;
+    }
+
+    // Estados de error
+    if (
+      run.status === "failed" ||
+      run.status === "cancelled" ||
+      run.status === "expired"
+    ) {
+      const errorMsg =
+        run.last_error?.message || `Run terminó con status: ${run.status}`;
+      console.error(`[agent] Run ${run.status}: ${errorMsg}`);
+      return {
+        output: `Error del asistente: ${errorMsg}. Intenta de nuevo.`,
+        toolResults,
+        debug: {
+          iterations,
+          toolsCalled: toolResults.length,
+          model: config.openaiModel,
+          usage: run.usage ?? null,
+          apiTrace,
+        },
+      };
+    }
   }
 
-  // Respuesta final del modelo
-  const output =
-    choice.message?.content?.trim() ||
-    "No pude generar una respuesta. Intenta de nuevo.";
+  // Obtener la respuesta final del thread
+  const messages = await openai.beta.threads.messages.list(threadId, {
+    order: "desc",
+    limit: 1,
+  });
 
-  // Guardar respuesta en historial
-  history.push({ role: "assistant", content: output });
-  saveHistory(args.sessionId, history);
+  const lastMessage = messages.data[0];
+  let output = "No pude generar una respuesta. Intenta de nuevo.";
+
+  if (lastMessage?.role === "assistant" && lastMessage.content.length > 0) {
+    const textBlock = lastMessage.content.find((c) => c.type === "text");
+    if (textBlock && textBlock.type === "text") {
+      output = textBlock.text.value.trim();
+    }
+  }
 
   console.log(
     `[agent] Respuesta generada (${iterations} iteraciones, ${toolResults.length} herramientas usadas)`,
@@ -544,9 +318,48 @@ export async function runAgent(args: {
     debug: {
       iterations,
       toolsCalled: toolResults.length,
-      model: response.model ?? "",
-      usage: response.usage ?? null,
+      model: config.openaiModel,
+      usage: run.usage ?? null,
       apiTrace,
     },
   };
+}
+
+// ── Polling helper ─────────────────────────────────────────────
+async function pollRunUntilActionable(
+  openai: ReturnType<typeof getOpenAIClient>,
+  threadId: string,
+  runId: string,
+): Promise<Awaited<ReturnType<typeof openai.beta.threads.runs.retrieve>>> {
+  const POLL_INTERVAL_MS = 1000;
+  const MAX_POLL_TIME_MS = 180_000; // 3 minutos máximo
+  const start = Date.now();
+
+  while (true) {
+    const run = await openai.beta.threads.runs.retrieve(threadId, runId);
+
+    if (
+      run.status === "completed" ||
+      run.status === "requires_action" ||
+      run.status === "failed" ||
+      run.status === "cancelled" ||
+      run.status === "expired"
+    ) {
+      return run;
+    }
+
+    if (Date.now() - start > MAX_POLL_TIME_MS) {
+      // Cancelar el run si tarda demasiado
+      try {
+        await openai.beta.threads.runs.cancel(threadId, runId);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(
+        "El asistente tardó demasiado en responder (timeout 3min).",
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
 }

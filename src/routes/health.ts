@@ -1,20 +1,27 @@
-import { Router } from 'express';
-import { config, isOpenAiEnabled } from '../config/env.js';
+import { Router } from "express";
+import { config, isOpenAiEnabled } from "../config/env.js";
 
 const router = Router();
 
 // Health check básico
-router.get('/health', (_req, res) => {
+router.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
 // Estado del proveedor de IA
-router.get('/health/ai', (_req, res) => {
-  const model = config.provider === 'ollama' ? config.ollamaModel : config.openaiModel;
+router.get("/health/ai", (_req, res) => {
+  const isFC = process.env.AI_MODE === "fc";
+  const model =
+    config.provider === "ollama"
+      ? config.ollamaModel
+      : isFC
+        ? config.openaiModelFC
+        : config.openaiModel;
   res.json({
     openAi: isOpenAiEnabled(),
     provider: config.provider,
-    model
+    model,
+    mode: isFC ? "function-calling" : "assistants-api",
   });
 });
 

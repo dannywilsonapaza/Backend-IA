@@ -13,7 +13,9 @@ export const config = {
 
   // OpenAI
   openaiApiKey: process.env.OPENAI_API_KEY || "",
-  openaiModel: "o3",
+  openaiModel: "gpt-4o",
+  openaiModelFC: "o3",
+  openaiAssistantId: process.env.OPENAI_ASSISTANT_ID || "",
 
   // Ollama
   ollamaModel: process.env.OLLAMA_MODEL || "llama3.1:8b",

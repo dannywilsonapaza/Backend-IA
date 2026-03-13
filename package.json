@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "dev:fc": "set AI_MODE=fc&& tsx watch src/index.ts",
     "dev:5066": "set PORT=5066&& tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json"
   },

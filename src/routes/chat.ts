@@ -12,6 +12,7 @@ import crypto from "crypto";
 import type { ChatRequest, ChatResponse, UiContext } from "../types/index.js";
 import { isOpenAiProvider } from "../config/env.js";
 import { runAgent } from "../ai/agentRunner.js";
+import { runAgentFC } from "../ai/agentRunnerFC.js";
 
 const router = Router();
 
@@ -40,7 +41,10 @@ router.get("/api/chat/health", (_req, res) => {
   return res.json({
     module: "chat",
     status: "ok",
-    mode: "function-calling",
+    mode:
+      process.env.AI_MODE === "fc"
+        ? "function-calling-o3"
+        : "assistants-api-gpt4o",
     openaiEnabled: isOpenAiProvider(),
     timestamp: new Date().toISOString(),
   });
@@ -69,8 +73,12 @@ router.post("/api/chat", async (req, res) => {
     } satisfies ChatResponse);
   }
 
+  // Modo definido por variable de entorno AI_MODE al iniciar el servidor
+  const useFC = process.env.AI_MODE === "fc";
+  const runner = useFC ? runAgentFC : runAgent;
+
   try {
-    const result = await runAgent({ chatInput, sessionId, uiContext, traceId });
+    const result = await runner({ chatInput, sessionId, uiContext, traceId });
 
     return res.json({
       output: result.output,
