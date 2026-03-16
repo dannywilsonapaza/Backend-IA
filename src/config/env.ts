@@ -29,6 +29,10 @@ export const config = {
     process.env.BACKEND_PRINCIPAL_TIMEOUT || 10000,
   ),
 
+  // ML API (Predicción de Precio FOB)
+  mlApiUrl: process.env.ML_API_URL || "http://localhost:8000",
+  mlApiTimeout: Number(process.env.ML_API_TIMEOUT || 10000),
+
   // n8n (redacción conversacional)
   n8nWebhookUrl: process.env.N8N_WEBHOOK_URL || "",
   n8nTimeout: Number(process.env.N8N_TIMEOUT || 15000),

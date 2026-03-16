@@ -61,6 +61,7 @@ const FUNCTION_TO_TOOL_ID: Record<string, string> = {
   buscar_cotizacion: "quote.search",
   sugerir_precio: "quote.suggest.price",
   calcular_markup: "quote.calc.markup",
+  predecir_precio_ml: "quote.predict.price",
 };
 
 // ── Formatear resultados de herramientas para el modelo ────────

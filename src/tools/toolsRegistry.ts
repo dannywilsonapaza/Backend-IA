@@ -11,6 +11,7 @@ import {
   quoteSuggestPriceTool,
   quoteCalcMarkupTool,
 } from "./toolsQuote.js";
+import { quotePredictPriceTool } from "./toolsPredict.js";
 
 const TOOLS: ToolDefinition[] = [
   quoteDetailTool,
@@ -23,6 +24,7 @@ const TOOLS: ToolDefinition[] = [
   quoteSearchTool,
   quoteSuggestPriceTool,
   quoteCalcMarkupTool,
+  quotePredictPriceTool,
 ];
 
 export function listTools(): ToolDefinition[] {

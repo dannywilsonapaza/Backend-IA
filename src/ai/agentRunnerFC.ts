@@ -56,6 +56,7 @@ const FUNCTION_TO_TOOL_ID: Record<string, string> = {
   buscar_cotizacion: "quote.search",
   sugerir_precio: "quote.suggest.price",
   calcular_markup: "quote.calc.markup",
+  predecir_precio_ml: "quote.predict.price",
 };
 
 const CHAT_TOOLS: ChatTool[] = [
@@ -249,6 +250,165 @@ const CHAT_TOOLS: ChatTool[] = [
           },
         },
         required: ["precioFob", "costoPonderado"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "predecir_precio_ml",
+      description:
+        "Predice el precio FOB de una cotización textil usando un modelo de Machine Learning (Ridge Regression, MAPE ~4.5%). " +
+        "Requiere datos de la cotización: costo ponderado, peso prenda (en LIBRAS, rango 0.16-0.46), cantidad prendas (en log1p), " +
+        "markup objetivo, año, título hilo, flags de acabados, y categóricas (cliente, semestre, proceso, tipo tela, tejido, fibra). " +
+        "IMPORTANTE: TPESOESTMPREN está en LIBRAS (no gramos). TCANTPRENPROY_log = ln(1 + cantidad_prendas). " +
+        "Valores categóricos válidos — SEMESTRE: ET,FL,FW,HI,HO,SP,SS; TPROCESPEPREN: AU,DD,EN,ES,EU,GD,GH,GR,GS,GV,GW,LU,NN,SW,UN,US,W2; " +
+        "TDESCTIPOTELA: COLOR ENTERO,DISEÑO,ESTAMPADA,RAYADA; tipo_tejido: FRENCH TERRY,INTERLOCK,JACQUARD,JERSEY,OTRO,PIQUE,RIB,WAFFLE; " +
+        "fibra: MELANGE,MODAL,ORGANICO,OTRO,PIMA,PIMA_ORGANICO,POLYCOTTON,SUPIMA,TANGUIS,UPLAND.",
+      parameters: {
+        type: "object",
+        properties: {
+          TCOSTPOND: {
+            type: "number",
+            description: "Costo ponderado por libra (USD)",
+          },
+          TPESOESTMPREN: {
+            type: "number",
+            description:
+              "Peso estimado de la prenda en LIBRAS (rango típico 0.16 - 0.46). NO en gramos.",
+          },
+          TCANTPRENPROY_log: {
+            type: "number",
+            description:
+              "Log natural de (1 + cantidad de prendas proyectada). Ej: 5000 prendas → ln(5001) ≈ 8.52",
+          },
+          TMKUPOBJE: {
+            type: "number",
+            description: "Markup objetivo (%)",
+          },
+          ANIO: {
+            type: "number",
+            description: "Año de la cotización (ej: 2025)",
+          },
+          titulo_hilo: {
+            type: "number",
+            description: "Título del hilo (Ne). Ej: 30, 40, 50, 60",
+          },
+          TPORCGASTCOMIAGEN: {
+            type: "number",
+            description: "% gasto comisión agente (default 0)",
+          },
+          TPORCMAQUCHICTENI: {
+            type: "number",
+            description: "% maquinaria chica teñido (default 0)",
+          },
+          TPORCMAQUMEDITENI: {
+            type: "number",
+            description: "% maquinaria mediana teñido (default 0)",
+          },
+          TPORCMAQUGRANTENI: {
+            type: "number",
+            description: "% maquinaria grande teñido (default 0)",
+          },
+          flag_lycra: {
+            type: "number",
+            description: "1 si contiene lycra, 0 si no (default 0)",
+          },
+          flag_msuave: {
+            type: "number",
+            description: "1 si es micro suave, 0 si no (default 0)",
+          },
+          flag_gwash: {
+            type: "number",
+            description: "1 si tiene garment wash, 0 si no (default 0)",
+          },
+          flag_antip: {
+            type: "number",
+            description: "1 si es antipilling, 0 si no (default 0)",
+          },
+          TABRVCLIE: {
+            type: "string",
+            description:
+              "Código de cliente (TCODICLIE del detalle, ej: '0111'). Se resuelve automáticamente al apellido del analista (ZAVALA, CHIHUAN, etc.)",
+          },
+          SEMESTRE: {
+            type: "string",
+            enum: ["ET", "FL", "FW", "HI", "HO", "SP", "SS"],
+            description: "Semestre/temporada de la cotización",
+          },
+          TPROCESPEPREN: {
+            type: "string",
+            enum: [
+              "AU",
+              "DD",
+              "EN",
+              "ES",
+              "EU",
+              "GD",
+              "GH",
+              "GR",
+              "GS",
+              "GV",
+              "GW",
+              "LU",
+              "NN",
+              "SW",
+              "UN",
+              "US",
+              "W2",
+            ],
+            description: "Código de proceso especial de prenda. NN = ninguno",
+          },
+          TDESCTIPOTELA: {
+            type: "string",
+            enum: ["COLOR ENTERO", "DISEÑO", "ESTAMPADA", "RAYADA"],
+            description: "Tipo de tela",
+          },
+          tipo_tejido: {
+            type: "string",
+            enum: [
+              "FRENCH TERRY",
+              "INTERLOCK",
+              "JACQUARD",
+              "JERSEY",
+              "OTRO",
+              "PIQUE",
+              "RIB",
+              "WAFFLE",
+            ],
+            description: "Tipo de tejido",
+          },
+          fibra: {
+            type: "string",
+            enum: [
+              "MELANGE",
+              "MODAL",
+              "ORGANICO",
+              "OTRO",
+              "PIMA",
+              "PIMA_ORGANICO",
+              "POLYCOTTON",
+              "SUPIMA",
+              "TANGUIS",
+              "UPLAND",
+            ],
+            description: "Tipo de fibra",
+          },
+        },
+        required: [
+          "TCOSTPOND",
+          "TPESOESTMPREN",
+          "TCANTPRENPROY_log",
+          "TMKUPOBJE",
+          "ANIO",
+          "titulo_hilo",
+          "TABRVCLIE",
+          "SEMESTRE",
+          "TPROCESPEPREN",
+          "TDESCTIPOTELA",
+          "tipo_tejido",
+          "fibra",
+        ],
       },
     },
   },
