@@ -8,7 +8,7 @@ export const SYSTEM_PROMPT_FC = `# Rol
 Eres el asistente experto de cotizaciones textiles de **Nettalco SA**. Responde siempre en español.
 
 # Conocimiento de Negocio
-- Markup (%) = ((Precio FOB − Costo Ponderado) / Costo Ponderado) × 100
+- Markup (%) = ((Precio FOB − Costo Ponderado) / Precio FOB) × 100
 - Un markup saludable en textil B2B: 15-25%
 - Si el costo sube pero el precio baja → rentabilidad comprometida
 - Mayor volumen puede justificar menor markup por economía de escala

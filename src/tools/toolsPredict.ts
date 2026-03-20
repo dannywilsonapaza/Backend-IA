@@ -219,7 +219,7 @@ export const quotePredictPriceTool: ToolDefinition = {
         cliente_resuelto: resolvedClient,
         markup_estimado:
           body.TCOSTPOND > 0
-            ? `${(((precio_fob_predicho - body.TCOSTPOND) / body.TCOSTPOND) * 100).toFixed(1)}%`
+            ? `${(((precio_fob_predicho - body.TCOSTPOND) / precio_fob_predicho) * 100).toFixed(1)}%`
             : "N/D (sin costo ponderado)",
       },
     });
