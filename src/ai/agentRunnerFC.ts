@@ -49,6 +49,12 @@ const FUNCTION_TO_TOOL_ID: Record<string, string> = {
   obtener_detalle: "quote.detail",
   obtener_colores: "quote.colors",
   obtener_componentes: "quote.components",
+  obtener_descriptores_estilo_nettalco: "quote.descriptores.estiloNettalco",
+  obtener_dimensiones_estilo_nettalco: "quote.dimensiones.estiloNettalco",
+  obtener_extras_cotizacion: "quote.extras.cotizacion",
+  obtener_hilados_color_cotizacion: "quote.hilados.color.cotizacion",
+  obtener_hilados_especiales_cotizacion: "quote.hilados.especiales.cotizacion",
+  obtener_minutajes_cotizacion: "quote.minutajes.cotizacion",
   listar_candidatos: "quote.compare.candidates",
   comparar_kpis: "quote.compare.kpis",
   comparar_componentes: "quote.compare.components",
@@ -100,6 +106,114 @@ const CHAT_TOOLS: ChatTool[] = [
     function: {
       name: "obtener_componentes",
       description: "Obtiene los componentes (avíos) de una cotización.",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_descriptores_estilo_nettalco",
+      description:
+        "Obtiene descriptores del estilo Nettalco por TCODIESTINETT (elementos/descriptores/estiloNettalco).",
+      parameters: {
+        type: "object",
+        properties: {
+          tcodiestinett: {
+            type: "string",
+            description: "Código de estilo Nettalco (TCODIESTINETT)",
+          },
+        },
+        required: ["tcodiestinett"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_dimensiones_estilo_nettalco",
+      description:
+        "Obtiene dimensiones del estilo Nettalco por TCODIESTINETT (elementos/dimensiones/estiloNettalco).",
+      parameters: {
+        type: "object",
+        properties: {
+          tcodiestinett: {
+            type: "string",
+            description: "Código de estilo Nettalco (TCODIESTINETT)",
+          },
+        },
+        required: ["tcodiestinett"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_extras_cotizacion",
+      description:
+        "Obtiene extras asociados a una cotización (elementos/extras/cotizacion/:tcodicoti).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_hilados_color_cotizacion",
+      description:
+        "Obtiene hilados por color de una cotización (elementos/hilados-color/cotizacion/:tcodicoti).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_hilados_especiales_cotizacion",
+      description:
+        "Obtiene hilados especiales de una cotización (elementos/hilados-especiales/cotizacion/:tcodicoti).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_minutajes_cotizacion",
+      description:
+        "Obtiene minutajes asociados a una cotización (elementos/minutajes/cotizacion/:tcodicoti).",
       parameters: {
         type: "object",
         properties: {

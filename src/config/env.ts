@@ -16,6 +16,7 @@ export const config = {
   openaiModel: "gpt-4o",
   openaiModelFC: "o3",
   openaiAssistantId: process.env.OPENAI_ASSISTANT_ID || "",
+  openaiSummaryModel: "gpt-4o-mini",
 
   // Ollama
   ollamaModel: process.env.OLLAMA_MODEL || "llama3.1:8b",

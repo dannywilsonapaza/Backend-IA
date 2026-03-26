@@ -10,6 +10,7 @@ import { config } from "../config/env.js";
 import { getToolById } from "../tools/toolsRegistry.js";
 import type { ToolExecutionContext } from "../tools/types.js";
 import type { ToolResult, UiContext } from "../types/index.js";
+import { callOpenAIWithModel } from "./providers/openai.js";
 
 // ── Mapeo sesión → thread ──────────────────────────────────────
 const sessionToThread = new Map<
@@ -49,11 +50,130 @@ async function getOrCreateThread(sessionId: string): Promise<string> {
   return thread.id;
 }
 
+// ── Rate limit (TPM) handling: resumir + rotar thread ─────────
+
+function isTpmRateLimitMessage(msg: string): boolean {
+  const m = (msg || "").toLowerCase();
+  return (
+    m.includes("rate limit reached") &&
+    (m.includes("tokens per min") || m.includes("tpm"))
+  );
+}
+
+function parseRetryAfterMs(msg: string): number | null {
+  const m = (msg || "").match(/try again in\s+(\d+)\s*ms/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+function extractTextFromAssistantMessageContent(content: any[]): string {
+  if (!Array.isArray(content)) return "";
+  const textBlock = content.find((c) => c?.type === "text");
+  const text =
+    textBlock?.type === "text" ? String(textBlock.text?.value || "") : "";
+  return text;
+}
+
+async function summarizeThreadForRotation(
+  openai: ReturnType<typeof getOpenAIClient>,
+  threadId: string,
+) {
+  // Tomamos una ventana acotada de mensajes para mantener el resumen barato.
+  const messages = await openai.beta.threads.messages.list(threadId, {
+    order: "asc",
+    limit: 40,
+  });
+
+  const transcriptLines: string[] = [];
+  for (const msg of messages.data || []) {
+    const role = msg.role === "assistant" ? "Asistente" : "Usuario";
+    const text = extractTextFromAssistantMessageContent(msg.content as any);
+    const t = (text || "").trim();
+    if (!t) continue;
+    transcriptLines.push(`${role}: ${t}`);
+  }
+
+  const transcript = transcriptLines.join("\n").slice(0, 14000);
+
+  const systemPrompt =
+    "Eres un compresor de historial de chat para un asistente de cotizaciones textiles. " +
+    "Devuelve un resumen corto y útil para continuar la conversación. No inventes datos.";
+
+  const userPrompt =
+    "Resume el historial para continuar sin perder contexto.\n" +
+    "Incluye SIEMPRE (si existe):\n" +
+    "- Objetivo del usuario\n" +
+    "- IDs de cotización y qué se hizo con cada uno\n" +
+    "- Números clave (precio/costo/markup)\n" +
+    "- Herramientas usadas (quote.detail, quote.colors, etc.)\n" +
+    "- Pendientes / siguiente paso\n" +
+    "Formato: viñetas. Máximo 1200 caracteres.\n\n" +
+    `HISTORIAL:\n${transcript}`;
+
+  try {
+    const r = await callOpenAIWithModel(
+      config.openaiSummaryModel,
+      systemPrompt,
+      userPrompt,
+      220,
+    );
+    return (r.text || "").trim() || "Resumen no disponible.";
+  } catch {
+    return "Resumen no disponible (error generando resumen).";
+  }
+}
+
+async function rotateThreadWithSummary(args: {
+  openai: ReturnType<typeof getOpenAIClient>;
+  sessionId: string;
+  summary: string;
+  chatInput: string;
+  uiContext?: UiContext;
+}): Promise<string> {
+  const newThread = await args.openai.beta.threads.create();
+
+  const ui = args.uiContext?.cotizacionId
+    ? `Contexto UI: el usuario está viendo la cotización #${args.uiContext.cotizacionId}`
+    : "Contexto UI: (no provisto)";
+
+  const content =
+    `[RESUMEN DEL HISTORIAL]\n${args.summary}\n\n` +
+    `[${ui}]\n\n` +
+    `[PETICIÓN ACTUAL]\n${args.chatInput}`;
+
+  await args.openai.beta.threads.messages.create(newThread.id, {
+    role: "user",
+    content,
+  });
+
+  sessionToThread.set(args.sessionId, {
+    threadId: newThread.id,
+    updatedAt: Date.now(),
+  });
+
+  console.log(
+    `[agent] Rotación de thread por TPM: nuevo thread ${newThread.id} para sesión ${args.sessionId}`,
+  );
+  return newThread.id;
+}
+
 // ── Mapeo de funciones OpenAI → tool ID interno ────────────────
 const FUNCTION_TO_TOOL_ID: Record<string, string> = {
   obtener_detalle: "quote.detail",
   obtener_colores: "quote.colors",
   obtener_componentes: "quote.components",
+  obtener_descriptores_estilo_nettalco: "quote.descriptores.estiloNettalco",
+  obtener_dimensiones_estilo_nettalco: "quote.dimensiones.estiloNettalco",
+  obtener_extras_cotizacion: "quote.extras.cotizacion",
+  obtener_hilados_color_cotizacion: "quote.hilados.color.cotizacion",
+  obtener_hilados_especiales_cotizacion: "quote.hilados.especiales.cotizacion",
+  obtener_minutajes_cotizacion: "quote.minutajes.cotizacion",
   listar_candidatos: "quote.compare.candidates",
   comparar_kpis: "quote.compare.kpis",
   comparar_componentes: "quote.compare.components",
@@ -180,7 +300,9 @@ export async function runAgent(args: {
     );
   }
 
-  const threadId = await getOrCreateThread(args.sessionId);
+  let threadId = await getOrCreateThread(args.sessionId);
+  let didRotateThread = false;
+  let didQuickRetry = false;
 
   // Construir mensaje del usuario con contexto de UI
   let userContent = args.chatInput;
@@ -278,6 +400,46 @@ export async function runAgent(args: {
     ) {
       const errorMsg =
         run.last_error?.message || `Run terminó con status: ${run.status}`;
+
+      // Manejo tipo ChatGPT: si revienta TPM, reintentamos y/o rotamos con resumen.
+      if (run.status === "failed" && isTpmRateLimitMessage(errorMsg)) {
+        const retryAfterMs = parseRetryAfterMs(errorMsg);
+
+        // 1) Reintento rápido (solo una vez) si el mensaje sugiere esperar unos ms.
+        if (!didQuickRetry && retryAfterMs !== null) {
+          didQuickRetry = true;
+          const waitMs = Math.min(2000, retryAfterMs + 80);
+          console.warn(
+            `[agent] TPM rate limit. Reintentando en ${waitMs}ms...`,
+          );
+          await sleepMs(waitMs);
+          run = await openai.beta.threads.runs.create(threadId, {
+            assistant_id: assistantId,
+          });
+          continue;
+        }
+
+        // 2) Si persiste, resumimos + rotamos a un thread nuevo y reintentamos (solo una vez).
+        if (!didRotateThread) {
+          didRotateThread = true;
+          console.warn(
+            `[agent] TPM persiste. Resumiendo historial y rotando thread...`,
+          );
+          const summary = await summarizeThreadForRotation(openai, threadId);
+          threadId = await rotateThreadWithSummary({
+            openai,
+            sessionId: args.sessionId,
+            summary,
+            chatInput: args.chatInput,
+            uiContext: args.uiContext,
+          });
+          run = await openai.beta.threads.runs.create(threadId, {
+            assistant_id: assistantId,
+          });
+          continue;
+        }
+      }
+
       console.error(`[agent] Run ${run.status}: ${errorMsg}`);
       return {
         output: `Error del asistente: ${errorMsg}. Intenta de nuevo.`,

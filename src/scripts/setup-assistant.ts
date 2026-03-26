@@ -156,6 +156,114 @@ const TOOLS: OpenAI.Beta.Assistants.AssistantTool[] = [
   {
     type: "function",
     function: {
+      name: "obtener_descriptores_estilo_nettalco",
+      description:
+        "Obtiene descriptores del estilo Nettalco por TCODIESTINETT (elementos/descriptores/estiloNettalco).",
+      parameters: {
+        type: "object",
+        properties: {
+          tcodiestinett: {
+            type: "string",
+            description: "Código de estilo Nettalco (TCODIESTINETT)",
+          },
+        },
+        required: ["tcodiestinett"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_dimensiones_estilo_nettalco",
+      description:
+        "Obtiene dimensiones del estilo Nettalco por TCODIESTINETT (elementos/dimensiones/estiloNettalco).",
+      parameters: {
+        type: "object",
+        properties: {
+          tcodiestinett: {
+            type: "string",
+            description: "Código de estilo Nettalco (TCODIESTINETT)",
+          },
+        },
+        required: ["tcodiestinett"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_extras_cotizacion",
+      description:
+        "Obtiene extras asociados a una cotización (elementos/extras/cotizacion/:tcodicoti).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_hilados_color_cotizacion",
+      description:
+        "Obtiene hilados por color de una cotización (elementos/hilados-color/cotizacion/:tcodicoti).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_hilados_especiales_cotizacion",
+      description:
+        "Obtiene hilados especiales de una cotización (elementos/hilados-especiales/cotizacion/:tcodicoti).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "obtener_minutajes_cotizacion",
+      description:
+        "Obtiene minutajes asociados a una cotización (elementos/minutajes/cotizacion/:tcodicoti).",
+      parameters: {
+        type: "object",
+        properties: {
+          cotizacionId: {
+            type: "number",
+            description: "ID numérico de la cotización",
+          },
+        },
+        required: ["cotizacionId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "listar_candidatos",
       description:
         "Lista cotizaciones candidatas para comparación histórica por grupo. Llamar PRIMERO antes de comparar KPIs/componentes/minutajes.",

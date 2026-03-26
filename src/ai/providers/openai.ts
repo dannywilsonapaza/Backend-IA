@@ -32,12 +32,26 @@ export async function callOpenAI(
   userPrompt: string,
   maxTokens: number,
 ): Promise<OpenAIResponse> {
+  return callOpenAIWithModel(
+    config.openaiModel,
+    systemPrompt,
+    userPrompt,
+    maxTokens,
+  );
+}
+
+export async function callOpenAIWithModel(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+): Promise<OpenAIResponse> {
   const openai = getClient();
 
-  const isReasoningModel = /^o\d/i.test(config.openaiModel);
+  const isReasoningModel = /^o\d/i.test(model);
 
   const response = await openai.chat.completions.create({
-    model: config.openaiModel,
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },

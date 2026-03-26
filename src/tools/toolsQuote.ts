@@ -4,6 +4,18 @@ import {
   getColoresCotizacion,
   getComponentesCotizacion,
   getDetalleCotizacion,
+  getDescriptoresEstiloNettalco,
+  getDimensionesEstiloNettalco,
+  getExtrasCotizacion,
+  getExtrasRubros,
+  getHiladosPorColorCotizacion,
+  getHiladosPorColorItems,
+  getHiladosPorColorColores,
+  getHiladosEspecialesCotizacion,
+  getHiladosEspecialesItems,
+  getMinutajesCotizacion,
+  getMinutajesCodigos,
+  getListaMinutajesCliente,
 } from "./backendPrincipalApi.js";
 import {
   obtenerCandidatos,
@@ -19,6 +31,31 @@ function pickCotizacionId(params: Record<string, any>): number | null {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return null;
   return n;
+}
+
+function pickNonEmptyString(
+  params: Record<string, any>,
+  keys: string[],
+): string | null {
+  for (const k of keys) {
+    const v = params?.[k];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return null;
+}
+
+async function tryGetDetalleFromUiContext(ctx: any): Promise<any | null> {
+  const uiCotIdRaw = ctx?.uiContext?.cotizacionId;
+  const cotId = Number(uiCotIdRaw);
+  if (!Number.isFinite(cotId) || cotId <= 0) return null;
+  const detalleResult = await getDetalleCotizacion(cotId, ctx.apiTrace);
+  if (!detalleResult.success) return null;
+
+  const d0 = Array.isArray((detalleResult as any).data?.data)
+    ? (detalleResult as any).data.data[0]
+    : ((detalleResult as any).data?.[0] ?? (detalleResult as any).data);
+  return d0 && typeof d0 === "object" ? d0 : null;
 }
 
 export const quoteDetailTool: ToolDefinition = {
@@ -203,6 +240,884 @@ export const quoteComponentsTool: ToolDefinition = {
       limits:
         componentes.length > 60
           ? { truncated: true, reason: "Se recortó a 60 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Descriptores por Estilo Nettalco ────────────────────
+export const quoteDescriptoresEstiloNettalcoTool: ToolDefinition = {
+  id: "quote.descriptores.estiloNettalco",
+  description:
+    "Obtiene descriptores del estilo Nettalco (elementos) por TCODIESTINETT.",
+  requiredParams: ["tcodiestinett"],
+  examples: [
+    "descriptores estilo nettalco E12345",
+    "descriptores del estilo nettalco para la cotización 216881",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    let tcodiestinett = pickNonEmptyString(params, [
+      "tcodiestinett",
+      "TCODIESTINETT",
+      "estiloNettalco",
+    ]);
+
+    if (!tcodiestinett) {
+      const d0 = await tryGetDetalleFromUiContext(ctx);
+      tcodiestinett =
+        typeof d0?.TCODIESTINETT === "string" ? d0.TCODIESTINETT.trim() : null;
+    }
+
+    if (!tcodiestinett) {
+      return {
+        intent: "quote.descriptores.estiloNettalco",
+        entities: { tcodiestinett: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta TCODIESTINETT",
+            data: {
+              message:
+                "Necesito el código de Estilo Nettalco (TCODIESTINETT) o que el usuario esté viendo una cotización con ese dato.",
+            },
+          },
+        ],
+      };
+    }
+
+    const result = await getDescriptoresEstiloNettalco(
+      tcodiestinett,
+      ctx.apiTrace,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.descriptores.estiloNettalco",
+        entities: { tcodiestinett },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando descriptores",
+            data: {
+              message: result.message ?? "Error al obtener descriptores.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rows = ((result.data ?? []) as any[]).slice(0, 200);
+    const total = Array.isArray(result.data) ? result.data.length : rows.length;
+
+    return {
+      intent: "quote.descriptores.estiloNettalco",
+      entities: { tcodiestinett },
+      artifacts: [
+        {
+          type: "table",
+          title: `Descriptores (Estilo Nettalco ${tcodiestinett})`,
+          data: { rows, total },
+        },
+      ],
+      limits:
+        total > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Dimensiones por Estilo Nettalco ─────────────────────
+export const quoteDimensionesEstiloNettalcoTool: ToolDefinition = {
+  id: "quote.dimensiones.estiloNettalco",
+  description:
+    "Obtiene dimensiones del estilo Nettalco (elementos) por TCODIESTINETT.",
+  requiredParams: ["tcodiestinett"],
+  examples: [
+    "dimensiones estilo nettalco E12345",
+    "dimensiones del estilo nettalco para la cotización 216881",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    let tcodiestinett = pickNonEmptyString(params, [
+      "tcodiestinett",
+      "TCODIESTINETT",
+      "estiloNettalco",
+    ]);
+
+    if (!tcodiestinett) {
+      const d0 = await tryGetDetalleFromUiContext(ctx);
+      tcodiestinett =
+        typeof d0?.TCODIESTINETT === "string" ? d0.TCODIESTINETT.trim() : null;
+    }
+
+    if (!tcodiestinett) {
+      return {
+        intent: "quote.dimensiones.estiloNettalco",
+        entities: { tcodiestinett: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta TCODIESTINETT",
+            data: {
+              message:
+                "Necesito el código de Estilo Nettalco (TCODIESTINETT) o que el usuario esté viendo una cotización con ese dato.",
+            },
+          },
+        ],
+      };
+    }
+
+    const result = await getDimensionesEstiloNettalco(
+      tcodiestinett,
+      ctx.apiTrace,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.dimensiones.estiloNettalco",
+        entities: { tcodiestinett },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando dimensiones",
+            data: {
+              message: result.message ?? "Error al obtener dimensiones.",
+            },
+          },
+        ],
+      };
+    }
+
+    // Normalizar payload: algunos endpoints responden envueltos como { data: { data: [...] } }
+    // o { data: { rows: [...] } }. Aquí lo “desempaquetamos”.
+    let data: any = (result as any).data;
+    for (let i = 0; i < 3; i++) {
+      if (Array.isArray(data)) break;
+      if (!data || typeof data !== "object") break;
+
+      const maybeRows = (data as any).rows;
+      if (Array.isArray(maybeRows)) {
+        data = maybeRows;
+        break;
+      }
+
+      if ("data" in (data as any)) {
+        data = (data as any).data;
+        continue;
+      }
+
+      break;
+    }
+
+    if (Array.isArray(data)) {
+      const rows = data.slice(0, 200);
+      return {
+        intent: "quote.dimensiones.estiloNettalco",
+        entities: { tcodiestinett },
+        artifacts: [
+          {
+            type: "table",
+            title: `Dimensiones (Estilo Nettalco ${tcodiestinett})`,
+            data: { rows, total: data.length },
+          },
+        ],
+        limits:
+          data.length > 200
+            ? { truncated: true, reason: "Se recortó a 200 filas" }
+            : undefined,
+      };
+    }
+
+    // Formato típico del backend principal:
+    // data: { detalleCabeceras: [{TCODITALL}], detalleDimensiones: [{TNUMEDIME, TDESCDIME, tallas:[{TCODITALL, TMEDIDIME}]}] }
+    if (data && typeof data === "object") {
+      const cabeceras = Array.isArray((data as any).detalleCabeceras)
+        ? ((data as any).detalleCabeceras as any[])
+        : null;
+      const dimensiones = Array.isArray((data as any).detalleDimensiones)
+        ? ((data as any).detalleDimensiones as any[])
+        : null;
+
+      if (cabeceras && dimensiones) {
+        const tallas = cabeceras
+          .map((c) => (c?.TCODITALL ?? "").toString().trim())
+          .filter((t) => t.length > 0);
+
+        // Orden simple numérico si aplica
+        tallas.sort((a, b) => {
+          const na = Number(a);
+          const nb = Number(b);
+          if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+          return a.localeCompare(b);
+        });
+
+        const rowsAll = dimensiones.map((d) => {
+          const row: Record<string, any> = {
+            TNUMEDIME: d?.TNUMEDIME ?? "N/D",
+            TDESCDIME: d?.TDESCDIME ?? "N/D",
+          };
+
+          const tallasArr = Array.isArray(d?.tallas) ? (d.tallas as any[]) : [];
+          const byTalla = new Map<string, any>();
+          for (const t of tallasArr) {
+            const k = (t?.TCODITALL ?? "").toString().trim();
+            if (!k) continue;
+            byTalla.set(k, t?.TMEDIDIME ?? "N/D");
+          }
+
+          for (const talla of tallas) {
+            row[`TALLA_${talla}`] = byTalla.get(talla) ?? "N/D";
+          }
+
+          return row;
+        });
+
+        const rows = rowsAll.slice(0, 120);
+
+        return {
+          intent: "quote.dimensiones.estiloNettalco",
+          entities: { tcodiestinett },
+          artifacts: [
+            {
+              type: "facts",
+              title: `Dimensiones (resumen) - Estilo Nettalco ${tcodiestinett}`,
+              data: {
+                tallas: tallas.join(", ") || "N/D",
+                totalDimensiones: rowsAll.length,
+              },
+            },
+            {
+              type: "table",
+              title: `Dimensiones por talla (Estilo Nettalco ${tcodiestinett})`,
+              data: { rows, total: rowsAll.length },
+            },
+          ],
+          limits:
+            rowsAll.length > 120
+              ? { truncated: true, reason: "Se recortó a 120 filas" }
+              : undefined,
+        };
+      }
+    }
+
+    if (!data || (typeof data === "object" && Object.keys(data).length === 0)) {
+      return {
+        intent: "quote.dimensiones.estiloNettalco",
+        entities: { tcodiestinett },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Sin dimensiones",
+            data: {
+              message: `No se encontraron dimensiones para el estilo Nettalco ${tcodiestinett} (o el endpoint devolvió un payload vacío).`,
+            },
+          },
+        ],
+      };
+    }
+
+    return {
+      intent: "quote.dimensiones.estiloNettalco",
+      entities: { tcodiestinett },
+      artifacts: [
+        {
+          type: "facts",
+          title: `Dimensiones (Estilo Nettalco ${tcodiestinett})`,
+          data: data ?? {},
+        },
+      ],
+    };
+  },
+};
+
+// ── TOOL: Extras de una cotización ────────────────────────────
+export const quoteExtrasCotizacionTool: ToolDefinition = {
+  id: "quote.extras.cotizacion",
+  description: "Obtiene los extras asociados a una cotización.",
+  requiredParams: ["cotizacionId"],
+  examples: ["extras de 216833", "mostrar extras cotización 216833"],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const cotizacionId = pickCotizacionId(params);
+    if (!cotizacionId) {
+      return {
+        intent: "quote.extras.cotizacion",
+        entities: { cotizacionId: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta cotizacionId",
+            data: { message: "Necesito el ID de la cotización." },
+          },
+        ],
+      };
+    }
+
+    const result = await getExtrasCotizacion(cotizacionId, ctx.apiTrace);
+    if (!result.success) {
+      return {
+        intent: "quote.extras.cotizacion",
+        entities: { cotizacionId },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando extras",
+            data: { message: result.message ?? "Error al obtener extras." },
+          },
+        ],
+      };
+    }
+
+    const extras = (result.data ?? []) as any[];
+    const rows = extras.slice(0, 200);
+
+    return {
+      intent: "quote.extras.cotizacion",
+      entities: { cotizacionId },
+      artifacts: [
+        {
+          type: "table",
+          title: `Extras de la cotización ${cotizacionId}`,
+          data: { rows, total: extras.length },
+        },
+      ],
+      limits:
+        extras.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Rubros de extras ────────────────────────────────────
+export const quoteExtrasRubrosTool: ToolDefinition = {
+  id: "quote.extras.rubros",
+  description:
+    "Lista rubros disponibles para extras (opcional filtrar por tcodirubr).",
+  requiredParams: [],
+  examples: ["rubros de extras", "rubros extras tcodirubr 02"],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const tcodirubr = pickNonEmptyString(params, ["tcodirubr", "TCODIRUBR"]);
+    const result = await getExtrasRubros(ctx.apiTrace, tcodirubr ?? undefined);
+    if (!result.success) {
+      return {
+        intent: "quote.extras.rubros",
+        entities: { tcodirubr: tcodirubr ?? null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando rubros",
+            data: {
+              message: result.message ?? "Error al obtener rubros de extras.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rubros = (result.data ?? []) as any[];
+    const rows = rubros.slice(0, 200);
+
+    return {
+      intent: "quote.extras.rubros",
+      entities: { tcodirubr: tcodirubr ?? null },
+      artifacts: [
+        {
+          type: "table",
+          title: tcodirubr
+            ? `Rubros de extras (filtro ${tcodirubr})`
+            : "Rubros de extras",
+          data: { rows, total: rubros.length },
+        },
+      ],
+      limits:
+        rubros.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Hilados por color (cotización) ──────────────────────
+export const quoteHiladosPorColorCotizacionTool: ToolDefinition = {
+  id: "quote.hilados.color.cotizacion",
+  description:
+    "Obtiene hilados por color asociados a una cotización (hilados-color/cotizacion).",
+  requiredParams: ["cotizacionId"],
+  examples: [
+    "hilados por color 216833",
+    "hilados-color de la cotización 216833",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const cotizacionId = pickCotizacionId(params);
+    if (!cotizacionId) {
+      return {
+        intent: "quote.hilados.color.cotizacion",
+        entities: { cotizacionId: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta cotizacionId",
+            data: { message: "Necesito el ID de la cotización." },
+          },
+        ],
+      };
+    }
+
+    const result = await getHiladosPorColorCotizacion(
+      cotizacionId,
+      ctx.apiTrace,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.hilados.color.cotizacion",
+        entities: { cotizacionId },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando hilados por color",
+            data: {
+              message: result.message ?? "Error al obtener hilados por color.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.hilados.color.cotizacion",
+      entities: { cotizacionId },
+      artifacts: [
+        {
+          type: "table",
+          title: `Hilados por color - cotización ${cotizacionId}`,
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Hilados por color (items) ───────────────────────────
+export const quoteHiladosPorColorItemsTool: ToolDefinition = {
+  id: "quote.hilados.color.items",
+  description:
+    "Lista items disponibles para hilados por color (opcional filtrar por numeItem).",
+  requiredParams: [],
+  examples: ["items de hilados por color", "items hilados-color numeItem 10"],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const numeItem = pickNonEmptyString(params, ["numeItem", "NUMEITEM"]);
+    const result = await getHiladosPorColorItems(
+      ctx.apiTrace,
+      numeItem ?? undefined,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.hilados.color.items",
+        entities: { numeItem: numeItem ?? null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando items",
+            data: {
+              message:
+                result.message ??
+                "Error al obtener items de hilados por color.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.hilados.color.items",
+      entities: { numeItem: numeItem ?? null },
+      artifacts: [
+        {
+          type: "table",
+          title: numeItem
+            ? `Items hilados por color (filtro ${numeItem})`
+            : "Items hilados por color",
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Hilados por color (colores) ─────────────────────────
+export const quoteHiladosPorColorColoresTool: ToolDefinition = {
+  id: "quote.hilados.color.colores",
+  description:
+    "Lista colores disponibles para hilados por color (opcional filtrar por numeColor).",
+  requiredParams: [],
+  examples: [
+    "colores de hilados por color",
+    "colores hilados-color numeColor 5",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const numeColor = pickNonEmptyString(params, ["numeColor", "NUMECOLOR"]);
+    const result = await getHiladosPorColorColores(
+      ctx.apiTrace,
+      numeColor ?? undefined,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.hilados.color.colores",
+        entities: { numeColor: numeColor ?? null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando colores",
+            data: {
+              message:
+                result.message ??
+                "Error al obtener colores de hilados por color.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.hilados.color.colores",
+      entities: { numeColor: numeColor ?? null },
+      artifacts: [
+        {
+          type: "table",
+          title: numeColor
+            ? `Colores hilados por color (filtro ${numeColor})`
+            : "Colores hilados por color",
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Hilados especiales (cotización) ─────────────────────
+export const quoteHiladosEspecialesCotizacionTool: ToolDefinition = {
+  id: "quote.hilados.especiales.cotizacion",
+  description: "Obtiene hilados especiales asociados a una cotización.",
+  requiredParams: ["cotizacionId"],
+  examples: ["hilados especiales 216833", "hilados-especiales de 216833"],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const cotizacionId = pickCotizacionId(params);
+    if (!cotizacionId) {
+      return {
+        intent: "quote.hilados.especiales.cotizacion",
+        entities: { cotizacionId: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta cotizacionId",
+            data: { message: "Necesito el ID de la cotización." },
+          },
+        ],
+      };
+    }
+
+    const result = await getHiladosEspecialesCotizacion(
+      cotizacionId,
+      ctx.apiTrace,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.hilados.especiales.cotizacion",
+        entities: { cotizacionId },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando hilados especiales",
+            data: {
+              message: result.message ?? "Error al obtener hilados especiales.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.hilados.especiales.cotizacion",
+      entities: { cotizacionId },
+      artifacts: [
+        {
+          type: "table",
+          title: `Hilados especiales - cotización ${cotizacionId}`,
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Hilados especiales (items) ──────────────────────────
+export const quoteHiladosEspecialesItemsTool: ToolDefinition = {
+  id: "quote.hilados.especiales.items",
+  description:
+    "Lista items disponibles para hilados especiales (opcional filtrar por numeItem).",
+  requiredParams: [],
+  examples: [
+    "items de hilados especiales",
+    "items hilados especiales numeItem 10",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const numeItem = pickNonEmptyString(params, ["numeItem", "NUMEITEM"]);
+    const result = await getHiladosEspecialesItems(
+      ctx.apiTrace,
+      numeItem ?? undefined,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.hilados.especiales.items",
+        entities: { numeItem: numeItem ?? null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando items",
+            data: {
+              message:
+                result.message ??
+                "Error al obtener items de hilados especiales.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.hilados.especiales.items",
+      entities: { numeItem: numeItem ?? null },
+      artifacts: [
+        {
+          type: "table",
+          title: numeItem
+            ? `Items hilados especiales (filtro ${numeItem})`
+            : "Items hilados especiales",
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Minutajes de una cotización ─────────────────────────
+export const quoteMinutajesCotizacionTool: ToolDefinition = {
+  id: "quote.minutajes.cotizacion",
+  description: "Obtiene minutajes asociados a una cotización.",
+  requiredParams: ["cotizacionId"],
+  examples: ["minutajes de 216833", "mostrar minutajes cotización 216833"],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const cotizacionId = pickCotizacionId(params);
+    if (!cotizacionId) {
+      return {
+        intent: "quote.minutajes.cotizacion",
+        entities: { cotizacionId: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta cotizacionId",
+            data: { message: "Necesito el ID de la cotización." },
+          },
+        ],
+      };
+    }
+
+    const result = await getMinutajesCotizacion(cotizacionId, ctx.apiTrace);
+    if (!result.success) {
+      return {
+        intent: "quote.minutajes.cotizacion",
+        entities: { cotizacionId },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando minutajes",
+            data: {
+              message: result.message ?? "Error al obtener minutajes.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.minutajes.cotizacion",
+      entities: { cotizacionId },
+      artifacts: [
+        {
+          type: "table",
+          title: `Minutajes de la cotización ${cotizacionId}`,
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Códigos de minutajes ────────────────────────────────
+export const quoteMinutajesCodigosTool: ToolDefinition = {
+  id: "quote.minutajes.codigos",
+  description:
+    "Lista códigos/actividades de minutajes (opcional filtrar por tcodiacti).",
+  requiredParams: [],
+  examples: ["códigos de minutajes", "minutajes códigos tcodiacti 010"],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    const tcodiacti = pickNonEmptyString(params, ["tcodiacti", "TCODIACTI"]);
+    const result = await getMinutajesCodigos(
+      ctx.apiTrace,
+      tcodiacti ?? undefined,
+    );
+    if (!result.success) {
+      return {
+        intent: "quote.minutajes.codigos",
+        entities: { tcodiacti: tcodiacti ?? null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando códigos",
+            data: {
+              message:
+                result.message ?? "Error al obtener códigos de minutajes.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.minutajes.codigos",
+      entities: { tcodiacti: tcodiacti ?? null },
+      artifacts: [
+        {
+          type: "table",
+          title: tcodiacti
+            ? `Códigos de minutajes (filtro ${tcodiacti})`
+            : "Códigos de minutajes",
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
+          : undefined,
+    };
+  },
+};
+
+// ── TOOL: Lista de minutajes por estilo cliente ───────────────
+export const quoteListaMinutajesClienteTool: ToolDefinition = {
+  id: "quote.minutajes.cliente",
+  description: "Obtiene lista de minutajes por estilo cliente (tcodiesticlie).",
+  requiredParams: ["tcodiesticlie"],
+  examples: [
+    "minutajes del estilo cliente ABC123",
+    "lista minutajes cliente ABC123",
+  ],
+  execute: async (params, ctx): Promise<ToolResult> => {
+    let tcodiesticlie = pickNonEmptyString(params, [
+      "tcodiesticlie",
+      "TCODIESTICLIE",
+      "estiloCliente",
+    ]);
+
+    if (!tcodiesticlie) {
+      const d0 = await tryGetDetalleFromUiContext(ctx);
+      tcodiesticlie =
+        typeof d0?.TCODIESTICLIE === "string" ? d0.TCODIESTICLIE.trim() : null;
+    }
+
+    if (!tcodiesticlie) {
+      return {
+        intent: "quote.minutajes.cliente",
+        entities: { tcodiesticlie: null },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Falta TCODIESTICLIE",
+            data: {
+              message:
+                "Necesito el código de Estilo Cliente (TCODIESTICLIE) o que el usuario esté viendo una cotización con ese dato.",
+            },
+          },
+        ],
+      };
+    }
+
+    const result = await getListaMinutajesCliente(tcodiesticlie, ctx.apiTrace);
+    if (!result.success) {
+      return {
+        intent: "quote.minutajes.cliente",
+        entities: { tcodiesticlie },
+        artifacts: [
+          {
+            type: "warning",
+            title: "Error consultando lista de minutajes",
+            data: {
+              message: result.message ?? "Error al obtener lista de minutajes.",
+            },
+          },
+        ],
+      };
+    }
+
+    const rowsAll = (result.data ?? []) as any[];
+    const rows = rowsAll.slice(0, 200);
+
+    return {
+      intent: "quote.minutajes.cliente",
+      entities: { tcodiesticlie },
+      artifacts: [
+        {
+          type: "table",
+          title: `Lista de minutajes (Estilo Cliente ${tcodiesticlie})`,
+          data: { rows, total: rowsAll.length },
+        },
+      ],
+      limits:
+        rowsAll.length > 200
+          ? { truncated: true, reason: "Se recortó a 200 filas" }
           : undefined,
     };
   },
