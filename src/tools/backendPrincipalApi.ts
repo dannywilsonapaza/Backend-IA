@@ -81,19 +81,6 @@ export async function getExtrasCotizacion(
   return data;
 }
 
-export async function getExtrasRubros(
-  trace: ApiTraceItem[],
-  tcodirubr?: string,
-): Promise<BackendResponse<any[]>> {
-  const q = tcodirubr ? `?tcodirubr=${encodeURIComponent(tcodirubr)}` : "";
-  const url = `${config.backendPrincipalUrl}/api/v1/cotizar/extras/rubros${q}`;
-  const { data } = await fetchJson<BackendResponse<any[]>>(url, {
-    trace,
-    traceName: "cotizar.extras.rubros",
-  });
-  return data;
-}
-
 export async function getHiladosPorColorCotizacion(
   cotizacionId: number,
   trace: ApiTraceItem[],
@@ -102,19 +89,6 @@ export async function getHiladosPorColorCotizacion(
   const { data } = await fetchJson<BackendResponse<any[]>>(url, {
     trace,
     traceName: "cotizar.hiladosColor.cotizacion",
-  });
-  return data;
-}
-
-export async function getHiladosPorColorItems(
-  trace: ApiTraceItem[],
-  numeItem?: string,
-): Promise<BackendResponse<any[]>> {
-  const q = numeItem ? `?numeItem=${encodeURIComponent(numeItem)}` : "";
-  const url = `${config.backendPrincipalUrl}/api/v1/cotizar/hilados-color/items${q}`;
-  const { data } = await fetchJson<BackendResponse<any[]>>(url, {
-    trace,
-    traceName: "cotizar.hiladosColor.items",
   });
   return data;
 }
@@ -144,19 +118,6 @@ export async function getHiladosEspecialesCotizacion(
   return data;
 }
 
-export async function getHiladosEspecialesItems(
-  trace: ApiTraceItem[],
-  numeItem?: string,
-): Promise<BackendResponse<any[]>> {
-  const q = numeItem ? `?numeItem=${encodeURIComponent(numeItem)}` : "";
-  const url = `${config.backendPrincipalUrl}/api/v1/cotizar/hilados-especiales/items${q}`;
-  const { data } = await fetchJson<BackendResponse<any[]>>(url, {
-    trace,
-    traceName: "cotizar.hiladosEspeciales.items",
-  });
-  return data;
-}
-
 export async function getMinutajesCotizacion(
   cotizacionId: number,
   trace: ApiTraceItem[],
@@ -165,31 +126,6 @@ export async function getMinutajesCotizacion(
   const { data } = await fetchJson<BackendResponse<any[]>>(url, {
     trace,
     traceName: "cotizar.minutajes.cotizacion",
-  });
-  return data;
-}
-
-export async function getMinutajesCodigos(
-  trace: ApiTraceItem[],
-  tcodiacti?: string,
-): Promise<BackendResponse<any[]>> {
-  const q = tcodiacti ? `?tcodiacti=${encodeURIComponent(tcodiacti)}` : "";
-  const url = `${config.backendPrincipalUrl}/api/v1/cotizar/minutajes/codigos${q}`;
-  const { data } = await fetchJson<BackendResponse<any[]>>(url, {
-    trace,
-    traceName: "cotizar.minutajes.codigos",
-  });
-  return data;
-}
-
-export async function getListaMinutajesCliente(
-  tcodiesticlie: string,
-  trace: ApiTraceItem[],
-): Promise<BackendResponse<any[]>> {
-  const url = `${config.backendPrincipalUrl}/api/v1/cotizar/minutajes/cliente/${encodeURIComponent(tcodiesticlie)}`;
-  const { data } = await fetchJson<BackendResponse<any[]>>(url, {
-    trace,
-    traceName: "cotizar.minutajes.cliente",
   });
   return data;
 }

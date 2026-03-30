@@ -72,6 +72,32 @@ async function sleepMs(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+function buildRuntimeDateContext(): string {
+  // Zona horaria de negocio para evitar ambiguedad en respuestas de fecha/hora.
+  const now = new Date();
+  const date = new Intl.DateTimeFormat("es-PE", {
+    timeZone: "America/Lima",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(now);
+  const time = new Intl.DateTimeFormat("es-PE", {
+    timeZone: "America/Lima",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(now);
+
+  return (
+    `[CONTEXTO_TEMPORAL]\n` +
+    `Fecha actual del servidor (America/Lima): ${date}\n` +
+    `Hora actual del servidor (America/Lima): ${time}\n` +
+    `Si el usuario pregunta por hoy/fecha/hora, usa este contexto y no una fecha supuesta.`
+  );
+}
+
 function extractTextFromAssistantMessageContent(content: any[]): string {
   if (!Array.isArray(content)) return "";
   const textBlock = content.find((c) => c?.type === "text");
@@ -142,7 +168,10 @@ async function rotateThreadWithSummary(args: {
     ? `Contexto UI: el usuario está viendo la cotización #${args.uiContext.cotizacionId}`
     : "Contexto UI: (no provisto)";
 
+  const runtimeDateContext = buildRuntimeDateContext();
+
   const content =
+    `${runtimeDateContext}\n\n` +
     `[RESUMEN DEL HISTORIAL]\n${args.summary}\n\n` +
     `[${ui}]\n\n` +
     `[PETICIÓN ACTUAL]\n${args.chatInput}`;
@@ -306,8 +335,14 @@ export async function runAgent(args: {
 
   // Construir mensaje del usuario con contexto de UI
   let userContent = args.chatInput;
+  const runtimeDateContext = buildRuntimeDateContext();
   if (args.uiContext?.cotizacionId) {
-    userContent = `[Contexto: el usuario está viendo la cotización #${args.uiContext.cotizacionId}]\n${args.chatInput}`;
+    userContent =
+      `${runtimeDateContext}\n` +
+      `[Contexto: el usuario está viendo la cotización #${args.uiContext.cotizacionId}]\n` +
+      `${args.chatInput}`;
+  } else {
+    userContent = `${runtimeDateContext}\n${args.chatInput}`;
   }
 
   // Agregar mensaje al thread
